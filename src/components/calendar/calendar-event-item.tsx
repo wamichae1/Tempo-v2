@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/popover";
 import { EventDetailPopover } from "./event-detail-popover";
 import { useCalendarPopoverBoundary } from "./calendar-popover-context";
+import { useCalendarData } from "@/features/calendar/calendar-data-context";
 import type {
   CalendarEvent,
   CalendarEventItemProps,
@@ -148,6 +149,7 @@ export function CalendarEventItem({
   onDragMouseDown,
   onResizeMouseDown,
   onEventChange,
+  onEventDelete,
   cursorY,
   cursorX,
   fixedWidth,
@@ -163,6 +165,8 @@ export function CalendarEventItem({
   const { event, segmentPosition = "full" } = positionedEvent;
   const color = event.color ?? "blue";
   const styles = eventColorStyles[color];
+  const { conflictIds } = useCalendarData();
+  const hasConflict = conflictIds.has(event.id);
   const eventIsPast = isPastProp ?? isPast(event.end);
   const { view, boundaryRight, headerBottom } = useCalendarPopoverBoundary();
   const isDayView = view === "day";
@@ -472,6 +476,7 @@ export function CalendarEventItem({
         "cursor-default hover:z-10 focus:outline-none focus-visible:outline-none",
         "overflow-hidden select-none",
         isSelected && "z-20",
+        hasConflict && "ring-2 ring-red-500/70 ring-inset",
         className,
       )}
       style={{
@@ -588,6 +593,7 @@ export function CalendarEventItem({
           <EventDetailPopover
             event={event}
             onEventChange={onEventChange}
+            onEventDelete={onEventDelete}
             onClose={() => onClosePopover?.()}
             onDockToSidebar={() => onDockToSidebar?.()}
             onPrevWeek={onPrevWeek}
@@ -602,6 +608,7 @@ export function CalendarEventItem({
             position={contextMenu}
             onClose={closeContextMenu}
             onEventChange={onEventChange}
+            onEventDelete={onEventDelete}
           />
         )}
       </>
@@ -617,6 +624,7 @@ export function CalendarEventItem({
           position={contextMenu}
           onClose={closeContextMenu}
           onEventChange={onEventChange}
+          onEventDelete={onEventDelete}
         />
       )}
     </>
@@ -643,6 +651,8 @@ export interface AllDayEventItemProps {
   ) => void;
   /** Callback when an event is changed (e.g. color change from context menu) */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Callback when context menu open state changes */
   onContextMenuOpenChange?: (open: boolean) => void;
   /** Whether the right sidebar is open (controls popover visibility) */
@@ -688,6 +698,7 @@ export function AllDayEventItem({
   spanEnd = true,
   onResizeMouseDown,
   onEventChange,
+  onEventDelete,
   onContextMenuOpenChange,
   isSidebarOpen,
   onDockToSidebar,
@@ -1004,6 +1015,7 @@ export function AllDayEventItem({
           <EventDetailPopover
             event={event}
             onEventChange={onEventChange}
+            onEventDelete={onEventDelete}
             onClose={() => onClosePopover?.()}
             onDockToSidebar={() => onDockToSidebar?.()}
             onPrevWeek={onPrevWeek}
@@ -1019,6 +1031,7 @@ export function AllDayEventItem({
             position={contextMenu}
             onClose={closeContextMenu}
             onEventChange={onEventChange}
+            onEventDelete={onEventDelete}
           />
         )}
       </>
@@ -1034,6 +1047,7 @@ export function AllDayEventItem({
           position={contextMenu}
           onClose={closeContextMenu}
           onEventChange={onEventChange}
+          onEventDelete={onEventDelete}
         />
       )}
     </>

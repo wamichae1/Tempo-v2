@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useCalendarData } from "@/features/calendar/calendar-data-context";
 import type { CalendarEvent, EventColor } from "./week-view-types";
 
 const EVENT_COLORS: EventColor[] = [
@@ -34,31 +35,12 @@ const colorSwatchClass: Record<EventColor, string> = {
   gray: "bg-event-gray-border",
 };
 
-interface CalendarAccountData {
-  email: string;
-  calendars: { name: string; color: EventColor }[];
-}
-
-const CALENDAR_ACCOUNTS: CalendarAccountData[] = [
-  {
-    email: "me@vmnog.com",
-    calendars: [
-      { name: "me@vmnog.com", color: "red" },
-      { name: "Personal", color: "purple" },
-      { name: "Work", color: "blue" },
-      { name: "Family", color: "orange" },
-      { name: "Side Projects", color: "yellow" },
-      { name: "Fitness", color: "green" },
-      { name: "Holidays in Brazil", color: "green" },
-    ],
-  },
-];
-
 interface EventContextMenuProps {
   event: CalendarEvent;
   position: { x: number; y: number };
   onClose: () => void;
   onEventChange?: (event: CalendarEvent) => void;
+  onEventDelete?: (event: CalendarEvent) => void;
 }
 
 function MenuItem({
@@ -154,11 +136,14 @@ export function EventContextMenu({
   position,
   onClose,
   onEventChange,
+  onEventDelete,
 }: EventContextMenuProps) {
   const menuRef = React.useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = React.useState(position);
   const [ready, setReady] = React.useState(false);
   const currentColor = event.color ?? "blue";
+  const { calendars, duplicateEvent, copyEvent, pasteEvent, hasClipboard } =
+    useCalendarData();
 
   React.useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -206,8 +191,8 @@ export function EventContextMenu({
     onClose();
   }
 
-  function handleCalendarSelect(calendarName: string) {
-    onEventChange?.({ ...event, calendarId: calendarName });
+  function handleCalendarSelect(calendarId: string) {
+    onEventChange?.({ ...event, calendarId });
     onClose();
   }
 
@@ -240,52 +225,77 @@ export function EventContextMenu({
 
       <Separator />
 
-      {/* Block on calendar */}
+      {/* Move to calendar */}
       <SubMenu
         trigger={
           <>
             <Monitor className="size-3.5" />
-            Block on calendar
+            Move to calendar
           </>
         }
       >
-        {CALENDAR_ACCOUNTS.map((account) => (
-          <React.Fragment key={account.email}>
-            <div className="px-2 py-1 text-[10px] text-white/40">
-              {account.email}
-            </div>
-            {account.calendars.map((cal) => (
-              <MenuItem
-                key={cal.name}
-                onSelect={() => handleCalendarSelect(cal.name)}
-              >
-                <div
-                  className={cn(
-                    "size-3 rounded-xs shrink-0",
-                    colorSwatchClass[cal.color],
-                  )}
-                />
-                {cal.name}
-              </MenuItem>
-            ))}
-          </React.Fragment>
+        {calendars.map((cal) => (
+          <MenuItem
+            key={cal.id}
+            onSelect={() => handleCalendarSelect(cal.id)}
+          >
+            <div
+              className={cn(
+                "size-3 rounded-xs shrink-0",
+                colorSwatchClass[cal.color],
+              )}
+            />
+            {cal.name}
+            {event.calendarId === cal.id && (
+              <Check className="ml-auto size-3 text-white/60" />
+            )}
+          </MenuItem>
         ))}
       </SubMenu>
 
       <Separator />
 
-      {/* Cut / Copy / Duplicate */}
-      <MenuItem>
+      {/* Cut / Copy / Paste / Duplicate */}
+      <MenuItem
+        onSelect={() => {
+          copyEvent(event);
+          onEventDelete?.(event);
+          onClose();
+        }}
+      >
         <SquareDashed className="size-3.5" />
         Cut
         <Shortcut>⌘X</Shortcut>
       </MenuItem>
-      <MenuItem>
+      <MenuItem
+        onSelect={() => {
+          copyEvent(event);
+          onClose();
+        }}
+      >
         <TabletSmartphone className="size-3.5" />
         Copy
         <Shortcut>⌘C</Shortcut>
       </MenuItem>
-      <MenuItem>
+      <MenuItem
+        onSelect={() => {
+          // Paste onto the same day as the clicked event (copied time-of-day
+          // is preserved by the store).
+          pasteEvent(event.start);
+          onClose();
+        }}
+        className={cn(!hasClipboard && "pointer-events-none opacity-40")}
+      >
+        <TabletSmartphone className="size-3.5" />
+        Paste
+        <Shortcut>⌘V</Shortcut>
+      </MenuItem>
+      <MenuItem
+        onSelect={() => {
+          duplicateEvent(event);
+          onClose();
+        }}
+      >
         <Copy className="size-3.5" />
         Duplicate
         <Shortcut>⌘D</Shortcut>
@@ -294,7 +304,13 @@ export function EventContextMenu({
       <Separator />
 
       {/* Delete */}
-      <MenuItem className="text-[#E56458] hover:!bg-[#DE5551] hover:!text-white focus:!bg-[#DE5551] focus:!text-white [&:hover>svg]:!text-white [&:focus>svg]:!text-white [&:hover>.ml-auto]:!text-white [&:focus>.ml-auto]:!text-white">
+      <MenuItem
+        className="text-[#E56458] hover:!bg-[#DE5551] hover:!text-white focus:!bg-[#DE5551] focus:!text-white [&:hover>svg]:!text-white [&:focus>svg]:!text-white [&:hover>.ml-auto]:!text-white [&:focus>.ml-auto]:!text-white"
+        onSelect={() => {
+          onEventDelete?.(event);
+          onClose();
+        }}
+      >
         <Trash2 className="size-3.5 text-[#E56458]" />
         Delete
         <Shortcut>delete</Shortcut>

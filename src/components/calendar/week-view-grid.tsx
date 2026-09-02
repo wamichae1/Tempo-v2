@@ -32,6 +32,7 @@ export function WeekViewGrid({
   resizeState,
   onEventResizeMouseDown,
   onEventChange,
+  onEventDelete,
   onContextMenuOpenChange,
   isSidebarOpen,
   onDockToSidebar,
@@ -134,6 +135,7 @@ export function WeekViewGrid({
               resizeState={resizeState}
               onEventResizeMouseDown={onEventResizeMouseDown}
               onEventChange={onEventChange}
+              onEventDelete={onEventDelete}
               onContextMenuOpenChange={onContextMenuOpenChange}
               isSidebarOpen={isSidebarOpen}
               onDockToSidebar={onDockToSidebar}
@@ -467,6 +469,7 @@ interface DayEventsColumnProps {
     edge: "top" | "bottom",
   ) => void;
   onEventChange?: (event: CalendarEvent) => void;
+  onEventDelete?: (event: CalendarEvent) => void;
   onContextMenuOpenChange?: (open: boolean) => void;
   isSidebarOpen?: boolean;
   onDockToSidebar?: () => void;
@@ -500,6 +503,7 @@ function DayEventsColumn({
   resizeState,
   onEventResizeMouseDown,
   onEventChange,
+  onEventDelete,
   onContextMenuOpenChange,
   isSidebarOpen,
   onDockToSidebar,
@@ -596,6 +600,7 @@ function DayEventsColumn({
             onDragMouseDown={onEventDragMouseDown}
             onResizeMouseDown={onEventResizeMouseDown}
             onEventChange={onEventChange}
+            onEventDelete={onEventDelete}
             onContextMenuOpenChange={onContextMenuOpenChange}
             isSidebarOpen={isSidebarOpen}
             onDockToSidebar={onDockToSidebar}

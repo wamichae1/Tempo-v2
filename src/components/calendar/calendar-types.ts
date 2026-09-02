@@ -3,6 +3,8 @@
  */
 export type ViewType = "day" | "week" | "month";
 
+import type { RecurrenceRule } from "@/lib/recurrence";
+
 /**
  * View settings for display preferences (toggleable from the view dropdown)
  */
@@ -70,6 +72,18 @@ export interface CalendarEvent {
   timezone?: string;
   /** Recurrence rule display string (e.g. "Every week on Thu") */
   recurrence?: string;
+  /** Structured recurrence rule (RFC 5545 subset). */
+  rrule?: RecurrenceRule;
+  /**
+   * For expanded recurrence occurrences: id of the base series event.
+   * Internal — set by `expandEventOccurrences`, never persisted.
+   */
+  baseId?: string;
+  /**
+   * For expanded recurrence occurrences: the original start of this
+   * occurrence before any edits. Internal — never persisted.
+   */
+  occurrenceStart?: Date;
   /** Reminders list */
   reminders?: EventReminder[];
   /** Busy/Free status */

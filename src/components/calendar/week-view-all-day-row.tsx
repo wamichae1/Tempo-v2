@@ -27,6 +27,7 @@ export function WeekViewAllDayRow({
   onAllDayResizeMouseDown,
   allDayScrollContentRef,
   onEventChange,
+  onEventDelete,
   onContextMenuOpenChange,
   isSidebarOpen,
   onDockToSidebar,
@@ -140,6 +141,7 @@ export function WeekViewAllDayRow({
                     isBeingResized={isBeingResized}
                     isBeingMoved={isBeingMoved}
                     onEventChange={onEventChange}
+                    onEventDelete={onEventDelete}
                     onContextMenuOpenChange={onContextMenuOpenChange}
                     isSidebarOpen={isSidebarOpen}
                     onDockToSidebar={onDockToSidebar}
@@ -238,6 +240,8 @@ interface AllDayEventRowProps {
   isBeingMoved?: boolean;
   /** Callback when an event is changed (e.g. color change from context menu) */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Callback when context menu open state changes */
   onContextMenuOpenChange?: (open: boolean) => void;
   isSidebarOpen?: boolean;
@@ -264,6 +268,7 @@ function AllDayEventRow({
   isBeingResized,
   isBeingMoved,
   onEventChange,
+  onEventDelete,
   onContextMenuOpenChange,
   isSidebarOpen,
   onDockToSidebar,
@@ -349,6 +354,7 @@ function AllDayEventRow({
         spanEnd={spanEnd}
         onResizeMouseDown={handleResizeMouseDown}
         onEventChange={onEventChange}
+        onEventDelete={onEventDelete}
         onContextMenuOpenChange={onContextMenuOpenChange}
         isSidebarOpen={isSidebarOpen}
         onDockToSidebar={onDockToSidebar}

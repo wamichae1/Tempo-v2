@@ -52,6 +52,8 @@ export interface WeekViewProps {
   onVisibleDaysChange?: (days: Date[]) => void;
   /** Callback when an event is changed (e.g. dragged to a new time) */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Whether the right sidebar is open */
   isSidebarOpen?: boolean;
   /** Callback to dock popover to sidebar (opens sidebar) */
@@ -124,6 +126,8 @@ export interface WeekViewGridProps {
   ) => void;
   /** Callback when an event is changed (e.g. color change from context menu) */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Callback when context menu open state changes */
   onContextMenuOpenChange?: (open: boolean) => void;
   /** Whether the right sidebar is open */
@@ -186,6 +190,8 @@ export interface WeekViewAllDayRowProps {
   ) => void;
   /** Callback when an event is changed */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Callback when context menu open state changes */
   onContextMenuOpenChange?: (open: boolean) => void;
   /** Ref to attach to the scroll content div for column measurements */
@@ -242,6 +248,8 @@ export interface CalendarEventItemProps {
   ) => void;
   /** Callback when an event is changed (e.g. color change from context menu) */
   onEventChange?: (event: CalendarEvent) => void;
+  /** Callback when an event should be deleted */
+  onEventDelete?: (event: CalendarEvent) => void;
   /** Raw cursor Y position for smooth dragging copy */
   cursorY?: number;
   /** Raw cursor X position for smooth dragging copy */

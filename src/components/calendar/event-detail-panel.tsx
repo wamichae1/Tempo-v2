@@ -14,8 +14,6 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   Copy,
   Globe,
@@ -31,6 +29,13 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useCalendarData } from "@/features/calendar/calendar-data-context";
+import {
+  describeRecurrence,
+  isWeekdayRule,
+  toISODate,
+  type RecurrenceRule,
+} from "@/lib/recurrence";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -46,6 +51,8 @@ import type { CalendarEvent, EventColor } from "./week-view-types";
 interface EventDetailPanelProps {
   event: CalendarEvent;
   onEventChange?: (event: CalendarEvent) => void;
+  onEventDelete?: (event: CalendarEvent) => void;
+  onClose?: () => void;
   onPrevWeek?: () => void;
   onNextWeek?: () => void;
   /** Extra action buttons rendered in the header row (after the "..." menu). */
@@ -247,20 +254,233 @@ function TimezoneDisplay({ timezone }: { timezone: string }) {
   );
 }
 
-function RecurrenceDisplay({ recurrence }: { recurrence: string }) {
-  const onIdx = recurrence.indexOf(" on ");
-  if (onIdx === -1) {
-    return <span className="text-foreground text-xs">{recurrence}</span>;
-  }
+type RecurrencePreset = "none" | "daily" | "weekly" | "weekdays" | "monthly" | "custom";
 
-  const main = recurrence.substring(0, onIdx);
-  const suffix = recurrence.substring(onIdx);
+function presetForRule(rule: RecurrenceRule | undefined, start: Date): RecurrencePreset {
+  if (!rule) return "none";
+  if (isWeekdayRule(rule)) return "weekdays";
+  if (rule.freq === "daily" && (rule.interval ?? 1) === 1) return "daily";
+  if (
+    rule.freq === "weekly" &&
+    (rule.interval ?? 1) === 1 &&
+    (!rule.byWeekDays ||
+      (rule.byWeekDays.length === 1 && rule.byWeekDays[0] === start.getDay()))
+  )
+    return "weekly";
+  if (rule.freq === "monthly" && (rule.interval ?? 1) === 1) return "monthly";
+  return "custom";
+}
+
+const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/**
+ * Compact recurrence editor: preset dropdown plus (for custom weekly rules)
+ * weekday toggles, and an end condition (never / on date / after N times).
+ */
+function RecurrenceEditor({
+  event,
+  onEventChange,
+}: {
+  event: CalendarEvent;
+  onEventChange?: (event: CalendarEvent) => void;
+}) {
+  const rule = event.rrule;
+  const preset = presetForRule(rule, event.start);
+  const [customOpen, setCustomOpen] = React.useState(preset === "custom");
+
+  const applyRule = (next: RecurrenceRule | undefined) => {
+    onEventChange?.({
+      ...event,
+      rrule: next,
+      recurrence: next ? describeRecurrence(next, event.start) : undefined,
+    });
+  };
+
+  const selectPreset = (value: RecurrencePreset) => {
+    if (value === "none") {
+      applyRule(undefined);
+      setCustomOpen(false);
+      return;
+    }
+    const base: RecurrenceRule =
+      value === "daily"
+        ? { freq: "daily" }
+        : value === "weekdays"
+          ? { freq: "weekly", byWeekDays: [1, 2, 3, 4, 5] }
+          : value === "weekly"
+            ? { freq: "weekly", byWeekDays: [event.start.getDay()] }
+            : value === "monthly"
+              ? { freq: "monthly" }
+              : (rule ?? { freq: "weekly", byWeekDays: [event.start.getDay()] });
+    if (value === "custom") setCustomOpen(true);
+    applyRule(base);
+  };
+
+  const weekDays = rule?.byWeekDays ?? [event.start.getDay()];
+
+  const toggleWeekDay = (day: number) => {
+    if (!rule) return;
+    const has = weekDays.includes(day);
+    const next = has ? weekDays.filter((d) => d !== day) : [...weekDays, day];
+    if (next.length === 0) return; // keep at least one day
+    applyRule({ ...rule, freq: "weekly", byWeekDays: next.sort((a, b) => a - b) });
+  };
+
+  const endMode: "never" | "until" | "count" = rule?.until
+    ? "until"
+    : rule?.count
+      ? "count"
+      : "never";
+
+  const presetLabel =
+    preset === "none"
+      ? "Does not repeat"
+      : rule
+        ? describeRecurrence(rule, event.start)
+        : "Repeat";
 
   return (
-    <span className="text-xs">
-      <span className="text-foreground">{main}</span>
-      <span className="text-[#C7C5C1] dark:text-[#595959]">{suffix}</span>
-    </span>
+    <div className="flex flex-col gap-2 px-4">
+      <div className="flex items-center gap-3">
+        <RefreshCcw className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-2 py-1 text-left text-xs hover:border-[#373737]",
+                rule ? "text-foreground" : "text-[#C7C5C1] dark:text-[#595959]",
+              )}
+            >
+              <span className="truncate">{presetLabel}</span>
+              <ChevronDown className="ml-auto size-3.5 shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[180px] bg-[#252525] border-[#303030]"
+          >
+            {(
+              [
+                ["none", "Does not repeat"],
+                ["daily", "Daily"],
+                ["weekly", `Weekly on ${format(event.start, "EEEE")}`],
+                ["weekdays", "Every weekday (Mon–Fri)"],
+                ["monthly", `Monthly on day ${event.start.getDate()}`],
+                ["custom", "Custom…"],
+              ] as [RecurrencePreset, string][]
+            ).map(([value, label]) => (
+              <DropdownMenuItem
+                key={value}
+                className="text-xs text-white focus:bg-[#303030] focus:text-white"
+                onSelect={() => selectPreset(value)}
+              >
+                {preset === value && <Check className="size-3.5" />}
+                <span className={cn(preset !== value && "pl-5")}>{label}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {rule && (customOpen || preset === "custom") && (
+        <div className="ml-7 flex items-center gap-1">
+          {WEEKDAY_LABELS.map((label, day) => (
+            <button
+              key={day}
+              type="button"
+              className={cn(
+                "flex size-6 items-center justify-center rounded-full text-[10px]",
+                weekDays.includes(day)
+                  ? "bg-[#3A85D3] text-white"
+                  : "text-[#C7C5C1] hover:bg-[#242424] dark:text-[#595959]",
+              )}
+              onClick={() => toggleWeekDay(day)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {rule && (
+        <div className="ml-7 flex items-center gap-2 text-xs">
+          <span className="text-[#C7C5C1] dark:text-[#595959]">Ends</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="text-foreground flex items-center gap-1 rounded-sm border border-transparent px-1.5 py-0.5 hover:border-[#373737]"
+              >
+                {endMode === "never"
+                  ? "Never"
+                  : endMode === "until"
+                    ? "On date"
+                    : "After N times"}
+                <ChevronDown className="size-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="min-w-[140px] bg-[#252525] border-[#303030]"
+            >
+              <DropdownMenuItem
+                className="text-xs text-white focus:bg-[#303030]"
+                onSelect={() => {
+                  const { until: _u, count: _c, ...rest } = rule;
+                  applyRule(rest);
+                }}
+              >
+                Never
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-xs text-white focus:bg-[#303030]"
+                onSelect={() =>
+                  applyRule({
+                    ...rule,
+                    count: undefined,
+                    until: toISODate(addDays(event.start, 90)),
+                  })
+                }
+              >
+                On date
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-xs text-white focus:bg-[#303030]"
+                onSelect={() =>
+                  applyRule({ ...rule, until: undefined, count: rule.count ?? 10 })
+                }
+              >
+                After N times
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {endMode === "until" && (
+            <input
+              type="date"
+              className="text-foreground rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-[#373737] focus:border-[#242424] focus:bg-[#242424] outline-none"
+              value={rule.until}
+              onChange={(e) => {
+                if (e.target.value) applyRule({ ...rule, until: e.target.value });
+              }}
+            />
+          )}
+          {endMode === "count" && (
+            <input
+              type="number"
+              min={1}
+              max={999}
+              className="text-foreground w-16 rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-[#373737] focus:border-[#242424] focus:bg-[#242424] outline-none"
+              value={rule.count ?? 10}
+              onChange={(e) => {
+                const n = Number.parseInt(e.target.value, 10);
+                if (!Number.isNaN(n) && n > 0) applyRule({ ...rule, count: n });
+              }}
+            />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -330,11 +550,12 @@ function EventTypeHelpIcon({ tooltip }: { tooltip?: string }) {
 export function EventDetailPanel({
   event,
   onEventChange,
-  onPrevWeek,
-  onNextWeek,
+  onEventDelete,
+  onClose,
   headerActions,
 }: EventDetailPanelProps) {
   const color = event.color ?? "blue";
+  const { calendars, duplicateEvent, copyEvent } = useCalendarData();
   const [eventType, setEventType] = React.useState<EventType>("Event");
   const [eventDropdownOpen, setEventDropdownOpen] = React.useState(false);
   const [hoveredOther, setHoveredOther] = React.useState(false);
@@ -794,21 +1015,37 @@ export function EventDetailPanel({
               side="left"
               className="min-w-[180px] bg-[#252525] border-[#303030]"
             >
-              <DropdownMenuItem className="text-xs text-white focus:!bg-[#303030] focus:!text-white">
+              <DropdownMenuItem
+                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                onSelect={() => {
+                  copyEvent(event);
+                  onEventDelete?.(event);
+                  onClose?.();
+                }}
+              >
                 <SquareDashed className="size-3.5" />
                 Cut
                 <DropdownMenuShortcut className="text-white/40">
                   ⌘X
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs text-white focus:!bg-[#303030] focus:!text-white">
+              <DropdownMenuItem
+                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                onSelect={() => copyEvent(event)}
+              >
                 <TabletSmartphone className="size-3.5" />
                 Copy
                 <DropdownMenuShortcut className="text-white/40">
                   ⌘C
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs text-white focus:!bg-[#303030] focus:!text-white">
+              <DropdownMenuItem
+                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                onSelect={() => {
+                  duplicateEvent(event);
+                  onClose?.();
+                }}
+              >
                 <Copy className="size-3.5" />
                 Duplicate
                 <DropdownMenuShortcut className="text-white/40">
@@ -816,7 +1053,13 @@ export function EventDetailPanel({
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-[#303030]" />
-              <DropdownMenuItem className="text-xs text-[#E56458] focus:!bg-[#DE5551] focus:!text-white focus:[&>svg]:!text-white focus:[&>[data-slot=dropdown-menu-shortcut]]:!text-white">
+              <DropdownMenuItem
+                className="text-xs text-[#E56458] focus:!bg-[#DE5551] focus:!text-white focus:[&>svg]:!text-white focus:[&>[data-slot=dropdown-menu-shortcut]]:!text-white"
+                onSelect={() => {
+                  onEventDelete?.(event);
+                  onClose?.();
+                }}
+              >
                 <Trash2 className="size-3.5 text-[#E56458]" />
                 Delete
                 <DropdownMenuShortcut className="text-white/40 tracking-normal">
@@ -997,40 +1240,8 @@ export function EventDetailPanel({
             </div>
           )}
 
-          {/* Recurrence row — active display for recurring, placeholder for non-recurring */}
-          {event.recurrence ? (
-            <div className="flex items-center gap-3 px-4">
-              <RefreshCcw className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
-              <div className="flex flex-1 items-center justify-between">
-                <RecurrenceDisplay recurrence={event.recurrence} />
-                <div className="flex items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-[#C7C5C1] dark:text-[#595959]"
-                    onClick={onPrevWeek}
-                  >
-                    <ChevronLeft className="size-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-[#C7C5C1] dark:text-[#595959]"
-                    onClick={onNextWeek}
-                  >
-                    <ChevronRight className="size-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 px-4">
-              <RefreshCcw className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
-              <span className="text-xs text-[#C7C5C1] dark:text-[#595959]">
-                Repeat
-              </span>
-            </div>
-          )}
+          {/* Recurrence editor */}
+          <RecurrenceEditor event={event} onEventChange={onEventChange} />
         </>
       ) : (
         <div className="-mt-2 flex items-center pl-8">
@@ -1078,12 +1289,47 @@ export function EventDetailPanel({
       {/* Divider */}
       <div className="border-border border-t" />
 
-      {/* Calendar */}
+      {/* Calendar — dropdown to move the event between calendars */}
       <div className="flex items-center gap-2 px-4">
-        <div className={cn("size-3 rounded-xs", colorDotClass[color])} />
-        <span className="text-foreground text-xs">
-          {event.calendarEmail ?? event.calendarId ?? "Calendar"}
-        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-sm border border-transparent px-2 py-1 -ml-2 hover:border-[#373737]"
+            >
+              <div
+                className={cn(
+                  "size-3 rounded-xs",
+                  colorDotClass[
+                    calendars.find((c) => c.id === event.calendarId)?.color ??
+                      color
+                  ],
+                )}
+              />
+              <span className="text-foreground text-xs">
+                {calendars.find((c) => c.id === event.calendarId)?.name ??
+                  "No calendar"}
+              </span>
+              <ChevronDown className="size-3 text-[#C7C5C1] dark:text-[#595959]" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[160px] bg-[#252525] border-[#303030]"
+          >
+            {calendars.map((cal) => (
+              <DropdownMenuItem
+                key={cal.id}
+                className="text-xs text-white focus:bg-[#303030] focus:text-white"
+                onSelect={() => onEventChange?.({ ...event, calendarId: cal.id })}
+              >
+                <div className={cn("size-3 rounded-xs", colorDotClass[cal.color])} />
+                <span className="flex-1">{cal.name}</span>
+                {event.calendarId === cal.id && <Check className="size-3.5" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Status */}

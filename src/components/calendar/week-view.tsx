@@ -148,6 +148,7 @@ export function WeekView({
   onDateChange,
   onVisibleDaysChange,
   onEventChange,
+  onEventDelete,
   isSidebarOpen,
   onDockToSidebar,
   onClosePopover,
@@ -405,6 +406,7 @@ export function WeekView({
               allDayResizeState={allDayResizeState ?? undefined}
               onAllDayResizeMouseDown={handleAllDayResizeMouseDown}
               onEventChange={onEventChange}
+              onEventDelete={onEventDelete}
               onContextMenuOpenChange={setContextMenuOpen}
               allDayScrollContentRef={allDayScrollContentRef}
               isSidebarOpen={isSidebarOpen}
@@ -444,6 +446,7 @@ export function WeekView({
                   resizeState={resizeState ?? undefined}
                   onEventResizeMouseDown={handleResizeMouseDown}
                   onEventChange={onEventChange}
+                  onEventDelete={onEventDelete}
                   onContextMenuOpenChange={setContextMenuOpen}
                   isSidebarOpen={isSidebarOpen}
                   onDockToSidebar={onDockToSidebar}

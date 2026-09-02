@@ -11,6 +11,7 @@ import type { CalendarEvent } from "./week-view-types";
 interface EventDetailPopoverProps {
   event: CalendarEvent;
   onEventChange?: (event: CalendarEvent) => void;
+  onEventDelete?: (event: CalendarEvent) => void;
   onClose: () => void;
   onDockToSidebar: () => void;
   onPrevWeek?: () => void;
@@ -31,6 +32,7 @@ interface EventDetailPopoverProps {
 export function EventDetailPopover({
   event,
   onEventChange,
+  onEventDelete,
   onClose,
   onDockToSidebar,
   onPrevWeek,
@@ -107,6 +109,8 @@ export function EventDetailPopover({
       <EventDetailPanel
         event={event}
         onEventChange={onEventChange}
+        onEventDelete={onEventDelete}
+        onClose={onClose}
         onPrevWeek={onPrevWeek}
         onNextWeek={onNextWeek}
         headerActions={popoverHeaderActions}
