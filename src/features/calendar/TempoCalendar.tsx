@@ -46,6 +46,9 @@ import {
 import { CalendarDataProvider } from "@/features/calendar/calendar-data-context";
 import { CalendarSidebar } from "@/features/calendar/calendar-sidebar";
 import { SearchPopover } from "@/features/calendar/search-popover";
+import { useAgentTools } from "@/features/agent/use-agent-tools";
+import { AgentPanel } from "@/features/agent/agent-panel";
+import { AgentConfirmDialog } from "@/features/agent/agent-confirm-dialog";
 import { expandEvents } from "@/lib/recurrence";
 import { findConflictingEventIds } from "@/lib/conflicts";
 
@@ -70,6 +73,7 @@ export function TempoCalendar() {
     startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON }),
   );
   const store = useCalendarEvents();
+  const agent = useAgentTools(store);
   const {
     events,
     calendars,
@@ -351,6 +355,7 @@ export function TempoCalendar() {
             )}
           </div>
           <div className="flex items-center gap-1">
+            <AgentPanel agent={agent} />
             <SearchPopover
               events={events}
               calendars={calendars}
@@ -464,6 +469,9 @@ export function TempoCalendar() {
             )}
           </div>
         </div>
+        {agent.pendingConfirmation && (
+          <AgentConfirmDialog confirmation={agent.pendingConfirmation} />
+        )}
       </main>
     </CalendarDataProvider>
   );

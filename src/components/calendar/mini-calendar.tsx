@@ -23,6 +23,8 @@ interface MiniCalendarProps {
   currentDate: Date;
   /** Days currently visible in the main calendar (highlighted in the grid). */
   visibleDays?: Date[];
+  /** A selected day to highlight (e.g. in a date-picker popover). */
+  selectedDate?: Date;
   /** Called when the user picks a day. */
   onSelect: (date: Date) => void;
   /** Number of days the week starts on (0 = Sunday). */
@@ -36,6 +38,7 @@ interface MiniCalendarProps {
 export function MiniCalendar({
   currentDate,
   visibleDays = [],
+  selectedDate,
   onSelect,
   weekStartsOn = 0,
 }: MiniCalendarProps) {
@@ -106,17 +109,22 @@ export function MiniCalendar({
           const inMonth = isSameMonth(day, displayedMonth);
           const today = isToday(day);
           const inVisibleWeek = isVisibleDay(day);
+          const selected = selectedDate ? isSameDay(day, selectedDate) : false;
           return (
             <button
               key={day.toISOString()}
               type="button"
               onClick={() => onSelect(day)}
+              aria-pressed={selected}
               className={cn(
                 "flex h-7 items-center justify-center rounded-full text-[11px] outline-none transition-colors",
+                "focus-visible:ring-ring focus-visible:ring-2",
                 inMonth ? "text-foreground" : "text-muted-foreground/50",
                 !today && "hover:bg-accent",
                 inVisibleWeek && !today && "bg-accent/60",
                 today && "bg-primary text-primary-foreground font-semibold",
+                selected && !today && "bg-foreground text-background font-semibold",
+                selected && today && "ring-ring ring-2 ring-offset-1",
               )}
             >
               {day.getDate()}

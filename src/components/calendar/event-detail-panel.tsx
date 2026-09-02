@@ -7,7 +7,6 @@ import {
   differenceInCalendarDays,
   differenceInMinutes,
   format,
-  parse,
 } from "date-fns";
 import {
   Bell,
@@ -45,7 +44,13 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { MiniCalendar } from "@/components/calendar/mini-calendar";
 import type { CalendarEvent, EventColor } from "./week-view-types";
 
 interface EventDetailPanelProps {
@@ -174,31 +179,6 @@ function applyTimeToDate(base: Date, hours: number, minutes: number): Date {
 
 function formatDateDisplay(date: Date): string {
   return format(date, "EEE MMM d");
-}
-
-/**
- * Parses a user-typed date string into a Date.
- * Strips any leading weekday name and parses "MMM d" (e.g., "Mar 11").
- * Uses the reference date's year. Returns null if unparseable.
- */
-function parseDateInput(input: string, referenceDate: Date): Date | null {
-  const trimmed = input.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  // Strip optional leading weekday (e.g., "Tue ", "Wed ")
-  const withoutWeekday = trimmed.replace(/^[a-z]{3}\s+/i, "");
-  if (withoutWeekday.length === 0) {
-    return null;
-  }
-
-  const parsed = parse(withoutWeekday, "MMM d", referenceDate);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed;
 }
 
 function formatVisibility(
@@ -348,7 +328,7 @@ function RecurrenceEditor({
             <button
               type="button"
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-2 py-1 text-left text-xs hover:border-[#373737]",
+                "flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-2 py-1 text-left text-xs hover:border-input dark:hover:border-[#373737]",
                 rule ? "text-foreground" : "text-[#C7C5C1] dark:text-[#595959]",
               )}
             >
@@ -393,7 +373,7 @@ function RecurrenceEditor({
                 "flex size-6 items-center justify-center rounded-full text-[10px]",
                 weekDays.includes(day)
                   ? "bg-[#3A85D3] text-white"
-                  : "text-[#C7C5C1] hover:bg-[#242424] dark:text-[#595959]",
+                  : "text-[#C7C5C1] hover:bg-accent dark:hover:bg-[#242424] dark:text-[#595959]",
               )}
               onClick={() => toggleWeekDay(day)}
             >
@@ -410,7 +390,7 @@ function RecurrenceEditor({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="text-foreground flex items-center gap-1 rounded-sm border border-transparent px-1.5 py-0.5 hover:border-[#373737]"
+                className="text-foreground flex items-center gap-1 rounded-sm border border-transparent px-1.5 py-0.5 hover:border-input dark:hover:border-[#373737]"
               >
                 {endMode === "never"
                   ? "Never"
@@ -458,7 +438,7 @@ function RecurrenceEditor({
           {endMode === "until" && (
             <input
               type="date"
-              className="text-foreground rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-[#373737] focus:border-[#242424] focus:bg-[#242424] outline-none"
+              className="text-foreground rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424] outline-none"
               value={rule.until}
               onChange={(e) => {
                 if (e.target.value) applyRule({ ...rule, until: e.target.value });
@@ -470,7 +450,7 @@ function RecurrenceEditor({
               type="number"
               min={1}
               max={999}
-              className="text-foreground w-16 rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-[#373737] focus:border-[#242424] focus:bg-[#242424] outline-none"
+              className="text-foreground w-16 rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424] outline-none"
               value={rule.count ?? 10}
               onChange={(e) => {
                 const n = Number.parseInt(e.target.value, 10);
@@ -747,137 +727,41 @@ export function EventDetailPanel({
     [],
   );
 
-  // --- Date input state & handlers ---
-  const [dateValue, setDateValue] = React.useState(() =>
-    formatDateDisplay(event.start),
-  );
-  const dateRef = React.useRef<HTMLInputElement>(null);
-  const dateEscapePressedRef = React.useRef(false);
-  const dateOnFocusRef = React.useRef(formatDateDisplay(event.start));
+  // --- Date picker popovers (start date, and end date for all-day events) ---
+  const [startDateOpen, setStartDateOpen] = React.useState(false);
+  const [endDateOpen, setEndDateOpen] = React.useState(false);
 
-  React.useEffect(() => {
-    setDateValue(formatDateDisplay(event.start));
-  }, [event.start]);
-
-  const handleDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setDateValue(e.target.value);
-    },
-    [],
-  );
-
-  const handleDateFocus = React.useCallback(() => {
-    dateOnFocusRef.current = formatDateDisplay(event.start);
-    requestAnimationFrame(() => {
-      dateRef.current?.select();
-    });
-  }, [event.start]);
-
-  const commitDate = React.useCallback(() => {
-    if (dateEscapePressedRef.current) {
-      dateEscapePressedRef.current = false;
-      return;
-    }
-    const parsed = parseDateInput(dateValue, event.start);
-    if (!parsed) {
-      setDateValue(dateOnFocusRef.current);
-      return;
-    }
-    const dayDiff = differenceInCalendarDays(parsed, event.start);
-    if (dayDiff === 0) {
-      setDateValue(formatDateDisplay(event.start));
-      return;
-    }
-    const newStart = addDays(event.start, dayDiff);
-    const newEnd = addDays(event.end, dayDiff);
-    setDateValue(formatDateDisplay(newStart));
-    onEventChange?.({ ...event, start: newStart, end: newEnd });
-  }, [dateValue, event, onEventChange]);
-
-  const handleDateKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        dateRef.current?.blur();
+  const handleStartDateSelect = React.useCallback(
+    (day: Date) => {
+      setStartDateOpen(false);
+      const dayDiff = differenceInCalendarDays(day, event.start);
+      if (dayDiff === 0) {
         return;
       }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        dateEscapePressedRef.current = true;
-        setDateValue(dateOnFocusRef.current);
-        dateRef.current?.blur();
-      }
+      // Shift both start and end by the same number of days, preserving time.
+      onEventChange?.({
+        ...event,
+        start: addDays(event.start, dayDiff),
+        end: addDays(event.end, dayDiff),
+      });
     },
-    [],
+    [event, onEventChange],
   );
 
-  // --- End date input state & handlers (shown only for all-day events) ---
-  const [endDateValue, setEndDateValue] = React.useState(() =>
-    formatDateDisplay(event.end),
-  );
-  const endDateRef = React.useRef<HTMLInputElement>(null);
-  const endDateEscapePressedRef = React.useRef(false);
-  const endDateOnFocusRef = React.useRef(formatDateDisplay(event.end));
-
-  React.useEffect(() => {
-    setEndDateValue(formatDateDisplay(event.end));
-  }, [event.end]);
-
-  const handleEndDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setEndDateValue(e.target.value);
-    },
-    [],
-  );
-
-  const handleEndDateFocus = React.useCallback(() => {
-    endDateOnFocusRef.current = formatDateDisplay(event.end);
-    requestAnimationFrame(() => {
-      endDateRef.current?.select();
-    });
-  }, [event.end]);
-
-  const commitEndDate = React.useCallback(() => {
-    if (endDateEscapePressedRef.current) {
-      endDateEscapePressedRef.current = false;
-      return;
-    }
-    const parsed = parseDateInput(endDateValue, event.end);
-    if (!parsed) {
-      setEndDateValue(endDateOnFocusRef.current);
-      return;
-    }
-    const dayDiff = differenceInCalendarDays(parsed, event.end);
-    if (dayDiff === 0) {
-      setEndDateValue(formatDateDisplay(event.end));
-      return;
-    }
-    const newEnd = addDays(event.end, dayDiff);
-    if (newEnd.getTime() < event.start.getTime()) {
-      setEndDateValue(endDateOnFocusRef.current);
-      return;
-    }
-    setEndDateValue(formatDateDisplay(newEnd));
-    onEventChange?.({ ...event, end: newEnd });
-  }, [endDateValue, event, onEventChange]);
-
-  const handleEndDateKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        endDateRef.current?.blur();
+  const handleEndDateSelect = React.useCallback(
+    (day: Date) => {
+      setEndDateOpen(false);
+      const dayDiff = differenceInCalendarDays(day, event.end);
+      if (dayDiff === 0) {
         return;
       }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        endDateEscapePressedRef.current = true;
-        setEndDateValue(endDateOnFocusRef.current);
-        endDateRef.current?.blur();
+      const newEnd = addDays(event.end, dayDiff);
+      if (newEnd.getTime() < event.start.getTime()) {
+        return;
       }
+      onEventChange?.({ ...event, end: newEnd });
     },
-    [],
+    [event, onEventChange],
   );
 
   // --- All-day toggle handler ---
@@ -948,7 +832,7 @@ export function EventDetailPanel({
             <button
               type="button"
               className={cn(
-                "flex items-center gap-0.5 text-xs font-medium rounded-sm border border-transparent px-2.5 py-1.5 -ml-2.5 gap-1.5 hover:border-[#373737]",
+                "flex items-center gap-0.5 text-xs font-medium rounded-sm border border-transparent px-2.5 py-1.5 -ml-2.5 gap-1.5 hover:border-input dark:hover:border-[#373737]",
                 eventDropdownOpen
                   ? "bg-[#252525] text-white"
                   : "text-foreground",
@@ -1005,7 +889,7 @@ export function EventDetailPanel({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7 border border-transparent hover:border-[#242424] hover:bg-[#242424] text-[#C7C5C1] dark:text-[#595959]"
+                className="size-7 border border-transparent hover:border-ring hover:bg-accent dark:hover:border-[#242424] dark:hover:bg-[#242424] text-[#C7C5C1] dark:text-[#595959]"
               >
                 <MoreHorizontal className="size-4" />
               </Button>
@@ -1082,7 +966,7 @@ export function EventDetailPanel({
         onBlur={commitTitle}
         onKeyDown={handleTitleKeyDown}
         placeholder="Title"
-        className="text-foreground placeholder:text-[#C7C5C1] dark:placeholder:text-[#595959] mx-2 rounded-sm border border-transparent bg-transparent px-2 py-1.5 text-xs outline-none hover:border-[#373737] focus:border-[#242424] focus:bg-[#242424]"
+        className="text-foreground placeholder:text-[#C7C5C1] dark:placeholder:text-[#595959] mx-2 rounded-sm border border-transparent bg-transparent px-2 py-1.5 text-xs outline-none hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424]"
       />
 
       {/* Divider */}
@@ -1100,7 +984,7 @@ export function EventDetailPanel({
               "flex shrink-0 items-center gap-2 rounded-sm border border-transparent px-2 py-1.5",
               event.isAllDay
                 ? "cursor-default"
-                : "cursor-text hover:border-[#373737] has-[:focus]:border-[#242424] has-[:focus]:bg-[#242424]",
+                : "cursor-text hover:border-input dark:hover:border-[#373737] has-[:focus]:border-ring has-[:focus]:bg-accent dark:has-[:focus]:border-[#242424] dark:has-[:focus]:bg-[#242424]",
             )}
             onClick={
               event.isAllDay ? undefined : () => startTimeRef.current?.focus()
@@ -1131,7 +1015,7 @@ export function EventDetailPanel({
               "flex min-w-0 flex-1 items-center rounded-sm border border-transparent px-2 py-1.5",
               event.isAllDay
                 ? "cursor-default"
-                : "cursor-text hover:border-[#373737] has-[:focus]:border-[#242424] has-[:focus]:bg-[#242424]",
+                : "cursor-text hover:border-input dark:hover:border-[#373737] has-[:focus]:border-ring has-[:focus]:bg-accent dark:has-[:focus]:border-[#242424] dark:has-[:focus]:bg-[#242424]",
             )}
             onClick={
               event.isAllDay ? undefined : () => endTimeRef.current?.focus()
@@ -1165,7 +1049,7 @@ export function EventDetailPanel({
         </div>
       )}
 
-      {/* Date — editable inline input(s), indented to align with time text */}
+      {/* Date — date-picker popover(s), indented to align with time text */}
       <div
         className={cn(
           "flex items-center gap-2 -mt-2",
@@ -1178,40 +1062,44 @@ export function EventDetailPanel({
         )}
       >
         {/* Start date */}
-        <div
-          className="mr-0 flex min-w-[6.5rem] self-start cursor-text items-center rounded-sm border border-transparent px-2 py-1.5 hover:border-[#373737] has-[:focus]:border-[#242424] has-[:focus]:bg-[#242424]"
-          onClick={() => dateRef.current?.focus()}
-        >
-          <input
-            ref={dateRef}
-            type="text"
-            value={dateValue}
-            onChange={handleDateChange}
-            onFocus={handleDateFocus}
-            onBlur={commitDate}
-            onKeyDown={handleDateKeyDown}
-            className="text-foreground text-xs bg-transparent outline-none border-none p-0"
-            size={dateValue.length}
-          />
-        </div>
+        <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label="Start date"
+              className="text-foreground mr-0 flex min-w-[6.5rem] cursor-pointer items-center self-start rounded-sm border border-transparent px-2 py-1.5 text-xs outline-none hover:border-input data-[state=open]:border-ring data-[state=open]:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:data-[state=open]:border-[#242424] dark:data-[state=open]:bg-[#242424]"
+            >
+              {formatDateDisplay(event.start)}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-auto p-0">
+            <MiniCalendar
+              currentDate={event.start}
+              selectedDate={event.start}
+              onSelect={handleStartDateSelect}
+            />
+          </PopoverContent>
+        </Popover>
         {/* End date — only visible for all-day events */}
         {event.isAllDay && (
-          <div
-            className="flex min-w-[6.5rem] self-start cursor-text items-center rounded-sm border border-transparent px-2 py-1.5 hover:border-[#373737] has-[:focus]:border-[#242424] has-[:focus]:bg-[#242424]"
-            onClick={() => endDateRef.current?.focus()}
-          >
-            <input
-              ref={endDateRef}
-              type="text"
-              value={endDateValue}
-              onChange={handleEndDateChange}
-              onFocus={handleEndDateFocus}
-              onBlur={commitEndDate}
-              onKeyDown={handleEndDateKeyDown}
-              className="text-foreground text-xs bg-transparent outline-none border-none p-0"
-              size={endDateValue.length}
-            />
-          </div>
+          <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="End date"
+                className="text-foreground flex min-w-[6.5rem] cursor-pointer items-center self-start rounded-sm border border-transparent px-2 py-1.5 text-xs outline-none hover:border-input data-[state=open]:border-ring data-[state=open]:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:data-[state=open]:border-[#242424] dark:data-[state=open]:bg-[#242424]"
+              >
+                {formatDateDisplay(event.end)}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-0">
+              <MiniCalendar
+                currentDate={event.end}
+                selectedDate={event.end}
+                onSelect={handleEndDateSelect}
+              />
+            </PopoverContent>
+          </Popover>
         )}
       </div>
 
@@ -1295,7 +1183,7 @@ export function EventDetailPanel({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center gap-2 rounded-sm border border-transparent px-2 py-1 -ml-2 hover:border-[#373737]"
+              className="flex items-center gap-2 rounded-sm border border-transparent px-2 py-1 -ml-2 hover:border-input dark:hover:border-[#373737]"
             >
               <div
                 className={cn(
