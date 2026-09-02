@@ -9,22 +9,17 @@ import {
   format,
 } from "date-fns";
 import {
-  Bell,
   Check,
   ChevronDown,
   CircleHelp,
   Clock,
   Copy,
-  Globe,
   MapPin,
   MoreHorizontal,
-  NotepadText,
   RefreshCcw,
   SquareDashed,
   TabletSmartphone,
   Trash2,
-  User,
-  Video,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -51,6 +46,7 @@ import {
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { MiniCalendar } from "@/components/calendar/mini-calendar";
+import { createEventHistoryLocationProvider } from "@/lib/location-suggestions";
 import type { CalendarEvent, EventColor } from "./week-view-types";
 
 interface EventDetailPanelProps {
@@ -181,60 +177,17 @@ function formatDateDisplay(date: Date): string {
   return format(date, "EEE MMM d");
 }
 
-function formatVisibility(
-  visibility?: "default" | "public" | "private",
-): string {
-  if (visibility === "public") {
-    return "Public";
-  }
-  if (visibility === "private") {
-    return "Private";
-  }
-  return "Default visibility";
-}
-
-function FieldRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value?: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 py-2">
-      <Icon className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
-      <span className="text-xs text-[#C7C5C1] dark:text-[#595959]">
-        {label}
-      </span>
-      {value && <span className="text-muted-foreground text-xs">{value}</span>}
-    </div>
-  );
-}
-
-function TimezoneDisplay({ timezone }: { timezone: string }) {
-  const spaceIdx = timezone.indexOf(" ");
-  if (spaceIdx === -1) {
-    return (
-      <span className="text-xs text-[#C7C5C1] dark:text-[#595959]">
-        {timezone}
-      </span>
-    );
-  }
-
-  const code = timezone.substring(0, spaceIdx);
-  const city = timezone.substring(spaceIdx + 1);
-
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs">
-      <span className="text-[#C7C5C1] dark:text-[#595959]">{code}</span>
-      <span className="text-foreground">{city}</span>
-    </span>
-  );
-}
-
 type RecurrencePreset = "none" | "daily" | "weekly" | "weekdays" | "monthly" | "custom";
+
+/**
+ * Applying a recurrence rule to a previously non-recurring event turns it
+ * into a series: the grid replaces the base event with expanded occurrences
+ * (`baseId@@date` ids), which remounts this editor popover and drops its
+ * local state. These one-shot sets carry the "keep the recurrence section
+ * expanded / open the custom editor" intent across that remount.
+ */
+const pendingExpandedSeries = new Set<string>();
+const pendingCustomSeries = new Set<string>();
 
 function presetForRule(rule: RecurrenceRule | undefined, start: Date): RecurrencePreset {
   if (!rule) return "none";
@@ -266,7 +219,16 @@ function RecurrenceEditor({
 }) {
   const rule = event.rrule;
   const preset = presetForRule(rule, event.start);
-  const [customOpen, setCustomOpen] = React.useState(preset === "custom");
+  const seriesId = event.baseId ?? event.id;
+  const [customOpen, setCustomOpen] = React.useState(
+    () => pendingCustomSeries.has(seriesId) || preset === "custom",
+  );
+  // Consume the pending intent once mounted (peeked above so StrictMode's
+  // double-invoked initializer doesn't swallow it).
+  React.useEffect(() => {
+    pendingCustomSeries.delete(seriesId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const applyRule = (next: RecurrenceRule | undefined) => {
     onEventChange?.({
@@ -282,6 +244,20 @@ function RecurrenceEditor({
       setCustomOpen(false);
       return;
     }
+    // First rule on this series remounts the popover — carry intent across.
+    if (!rule) {
+      pendingExpandedSeries.add(seriesId);
+    }
+    if (value === "custom") {
+      // Open the custom editor immediately; keep an existing custom rule
+      // untouched and only seed a weekly rule when starting from none.
+      setCustomOpen(true);
+      if (!rule) {
+        pendingCustomSeries.add(seriesId);
+        applyRule({ freq: "weekly", byWeekDays: [event.start.getDay()] });
+      }
+      return;
+    }
     const base: RecurrenceRule =
       value === "daily"
         ? { freq: "daily" }
@@ -289,10 +265,7 @@ function RecurrenceEditor({
           ? { freq: "weekly", byWeekDays: [1, 2, 3, 4, 5] }
           : value === "weekly"
             ? { freq: "weekly", byWeekDays: [event.start.getDay()] }
-            : value === "monthly"
-              ? { freq: "monthly" }
-              : (rule ?? { freq: "weekly", byWeekDays: [event.start.getDay()] });
-    if (value === "custom") setCustomOpen(true);
+            : { freq: "monthly" };
     applyRule(base);
   };
 
@@ -336,10 +309,7 @@ function RecurrenceEditor({
               <ChevronDown className="ml-auto size-3.5 shrink-0" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="min-w-[180px] bg-[#252525] border-[#303030]"
-          >
+          <DropdownMenuContent align="start" className="min-w-[180px]">
             {(
               [
                 ["none", "Does not repeat"],
@@ -352,7 +322,7 @@ function RecurrenceEditor({
             ).map(([value, label]) => (
               <DropdownMenuItem
                 key={value}
-                className="text-xs text-white focus:bg-[#303030] focus:text-white"
+                className="text-xs"
                 onSelect={() => selectPreset(value)}
               >
                 {preset === value && <Check className="size-3.5" />}
@@ -400,12 +370,9 @@ function RecurrenceEditor({
                 <ChevronDown className="size-3" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="min-w-[140px] bg-[#252525] border-[#303030]"
-            >
+            <DropdownMenuContent align="start" className="min-w-[140px]">
               <DropdownMenuItem
-                className="text-xs text-white focus:bg-[#303030]"
+                className="text-xs"
                 onSelect={() => {
                   const { until: _u, count: _c, ...rest } = rule;
                   applyRule(rest);
@@ -414,7 +381,7 @@ function RecurrenceEditor({
                 Never
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-xs text-white focus:bg-[#303030]"
+                className="text-xs"
                 onSelect={() =>
                   applyRule({
                     ...rule,
@@ -426,7 +393,7 @@ function RecurrenceEditor({
                 On date
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-xs text-white focus:bg-[#303030]"
+                className="text-xs"
                 onSelect={() =>
                   applyRule({ ...rule, until: undefined, count: rule.count ?? 10 })
                 }
@@ -436,13 +403,9 @@ function RecurrenceEditor({
             </DropdownMenuContent>
           </DropdownMenu>
           {endMode === "until" && (
-            <input
-              type="date"
-              className="text-foreground rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424] outline-none"
-              value={rule.until}
-              onChange={(e) => {
-                if (e.target.value) applyRule({ ...rule, until: e.target.value });
-              }}
+            <UntilDatePicker
+              until={rule.until!}
+              onChange={(iso) => applyRule({ ...rule, until: iso })}
             />
           )}
           {endMode === "count" && (
@@ -461,6 +424,45 @@ function RecurrenceEditor({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Ends on" date picker for recurrence rules — same MiniCalendar + Popover
+ * pattern as the event start/end date pickers.
+ */
+function UntilDatePicker({
+  until,
+  onChange,
+}: {
+  until: string;
+  onChange: (iso: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const date = React.useMemo(() => new Date(`${until}T00:00:00`), [until]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Recurrence end date"
+          className="text-foreground flex cursor-pointer items-center rounded-sm border border-transparent px-1.5 py-0.5 text-xs outline-none hover:border-input data-[state=open]:border-ring data-[state=open]:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:data-[state=open]:border-[#242424] dark:data-[state=open]:bg-[#242424]"
+        >
+          {formatDateDisplay(date)}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <MiniCalendar
+          currentDate={date}
+          selectedDate={date}
+          onSelect={(d) => {
+            onChange(toISODate(d));
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -508,11 +510,11 @@ function EventTypeHelpIcon({ tooltip }: { tooltip?: string }) {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <CircleHelp className="size-3.5 text-white" />
+      <CircleHelp className="size-3.5 text-muted-foreground" />
       {tooltipPos &&
         ReactDOM.createPortal(
           <div
-            className="pointer-events-none fixed z-[100] max-w-[240px] rounded-sm bg-[#252525] border border-[#303030] px-2 py-1 text-xs text-white shadow-md"
+            className="pointer-events-none fixed z-[100] max-w-[240px] rounded-sm border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
             style={{
               top: tooltipPos.top,
               left: tooltipPos.left - 8,
@@ -524,6 +526,118 @@ function EventTypeHelpIcon({ tooltip }: { tooltip?: string }) {
           document.body,
         )}
     </span>
+  );
+}
+
+/**
+ * Editable Location field with client-side autocomplete. Suggestions come
+ * from a pluggable LocationProvider (currently locations already used on the
+ * user's events); typing always accepts free-form text.
+ */
+function LocationField({
+  event,
+  onEventChange,
+}: {
+  event: CalendarEvent;
+  onEventChange?: (event: CalendarEvent) => void;
+}) {
+  const { events } = useCalendarData();
+  const provider = React.useMemo(
+    () => createEventHistoryLocationProvider(events),
+    [events],
+  );
+
+  const [value, setValue] = React.useState(event.location ?? "");
+  const [open, setOpen] = React.useState(false);
+  const [highlighted, setHighlighted] = React.useState(0);
+
+  // Sync when switching to a different event or the location changes externally.
+  React.useEffect(() => {
+    setValue(event.location ?? "");
+  }, [event.id, event.location]);
+
+  const suggestions = React.useMemo(
+    () => (open ? provider.getSuggestions(value) : []),
+    [open, provider, value],
+  );
+
+  const commit = (next: string) => {
+    setValue(next);
+    onEventChange?.({ ...event, location: next });
+  };
+
+  const selectSuggestion = (suggestion: string) => {
+    commit(suggestion);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      setOpen(false);
+      return;
+    }
+    if (suggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted(
+        (i) => (i - 1 + suggestions.length) % suggestions.length,
+      );
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      selectSuggestion(suggestions[highlighted]);
+    }
+  };
+
+  return (
+    <div className="relative flex items-center gap-3 py-1">
+      <MapPin className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          commit(e.target.value);
+          setOpen(true);
+          setHighlighted(0);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        placeholder="Location"
+        role="combobox"
+        aria-expanded={suggestions.length > 0}
+        aria-autocomplete="list"
+        className="text-foreground placeholder:text-[#C7C5C1] dark:placeholder:text-[#595959] min-w-0 flex-1 rounded-sm border border-transparent bg-transparent px-2 py-1.5 text-xs outline-none hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424]"
+      />
+      {suggestions.length > 0 && (
+        <ul
+          role="listbox"
+          className="absolute top-full left-0 right-0 z-50 mt-1 overflow-hidden rounded-sm border bg-popover text-popover-foreground shadow-md"
+        >
+          {suggestions.map((suggestion, i) => (
+            <li
+              key={suggestion}
+              role="option"
+              aria-selected={i === highlighted}
+              // Prevent input blur so the click registers before the list closes.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => selectSuggestion(suggestion)}
+              onMouseEnter={() => setHighlighted(i)}
+              className={cn(
+                "cursor-pointer truncate px-2 py-1.5 text-xs",
+                i === highlighted
+                  ? "bg-accent text-accent-foreground"
+                  : "text-foreground",
+              )}
+            >
+              {suggestion}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -539,8 +653,14 @@ export function EventDetailPanel({
   const [eventType, setEventType] = React.useState<EventType>("Event");
   const [eventDropdownOpen, setEventDropdownOpen] = React.useState(false);
   const [hoveredOther, setHoveredOther] = React.useState(false);
-  /** Whether the compact "All-day / Time zone / Repeat" row is expanded into individual rows. */
-  const [optionsExpanded, setOptionsExpanded] = React.useState(false);
+  /** Whether the compact "All-day / Repeat" row is expanded into individual rows. */
+  const [optionsExpanded, setOptionsExpanded] = React.useState(() =>
+    pendingExpandedSeries.has(event.baseId ?? event.id),
+  );
+  React.useEffect(() => {
+    pendingExpandedSeries.delete(event.baseId ?? event.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [titleValue, setTitleValue] = React.useState(event.title);
   const titleRef = React.useRef<HTMLInputElement>(null);
   const escapePressedRef = React.useRef(false);
@@ -551,10 +671,18 @@ export function EventDetailPanel({
     setTitleValue(event.title);
   }, [event.title]);
 
-  // Reset expanded options when switching to a different event
+  // Reset expanded options when switching to a different event (not on mount,
+  // so the pending-expanded intent above survives). Keyed on the series
+  // identity (baseId) so applying a recurrence rule — which renames the event
+  // to an occurrence id — does not collapse the open editor.
+  const seriesKey = event.baseId ?? event.id;
+  const prevSeriesKeyRef = React.useRef(seriesKey);
   React.useEffect(() => {
-    setOptionsExpanded(false);
-  }, [event.id]);
+    if (prevSeriesKeyRef.current !== seriesKey) {
+      prevSeriesKeyRef.current = seriesKey;
+      setOptionsExpanded(false);
+    }
+  }, [seriesKey]);
 
   const handleTitleChange = React.useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -834,7 +962,7 @@ export function EventDetailPanel({
               className={cn(
                 "flex items-center gap-0.5 text-xs font-medium rounded-sm border border-transparent px-2.5 py-1.5 -ml-2.5 gap-1.5 hover:border-input dark:hover:border-[#373737]",
                 eventDropdownOpen
-                  ? "bg-[#252525] text-white"
+                  ? "bg-accent text-foreground dark:bg-[#242424]"
                   : "text-foreground",
               )}
             >
@@ -854,13 +982,13 @@ export function EventDetailPanel({
             side="left"
             sideOffset={12}
             alignOffset={-4}
-            className="min-w-[180px] bg-[#252525] border-[#303030]"
+            className="min-w-[180px]"
             onMouseLeave={() => setHoveredOther(false)}
           >
             <DropdownMenuItem
               className={cn(
-                "group/item text-xs text-white focus:bg-[#303030] focus:text-white",
-                !hoveredOther && "bg-[#303030]",
+                "group/item text-xs",
+                !hoveredOther && "bg-accent",
               )}
               onSelect={() => setEventType(eventType)}
               onMouseEnter={() => setHoveredOther(false)}
@@ -869,11 +997,11 @@ export function EventDetailPanel({
               <span className="flex-1">{eventType}</span>
               <EventTypeHelpIcon tooltip={EVENT_TYPE_TOOLTIPS[eventType]} />
             </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-[#303030]" />
+            <DropdownMenuSeparator />
             {otherTypes.map((type) => (
               <DropdownMenuItem
                 key={type}
-                className="group/item text-xs text-white focus:bg-[#303030] focus:text-white pl-8"
+                className="group/item text-xs pl-8"
                 onSelect={() => setEventType(type)}
                 onMouseEnter={() => setHoveredOther(true)}
               >
@@ -897,10 +1025,10 @@ export function EventDetailPanel({
             <DropdownMenuContent
               align="start"
               side="left"
-              className="min-w-[180px] bg-[#252525] border-[#303030]"
+              className="min-w-[180px]"
             >
               <DropdownMenuItem
-                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                className="text-xs"
                 onSelect={() => {
                   copyEvent(event);
                   onEventDelete?.(event);
@@ -909,22 +1037,22 @@ export function EventDetailPanel({
               >
                 <SquareDashed className="size-3.5" />
                 Cut
-                <DropdownMenuShortcut className="text-white/40">
+                <DropdownMenuShortcut className="text-muted-foreground">
                   ⌘X
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                className="text-xs"
                 onSelect={() => copyEvent(event)}
               >
                 <TabletSmartphone className="size-3.5" />
                 Copy
-                <DropdownMenuShortcut className="text-white/40">
+                <DropdownMenuShortcut className="text-muted-foreground">
                   ⌘C
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-xs text-white focus:!bg-[#303030] focus:!text-white"
+                className="text-xs"
                 onSelect={() => {
                   duplicateEvent(event);
                   onClose?.();
@@ -932,11 +1060,11 @@ export function EventDetailPanel({
               >
                 <Copy className="size-3.5" />
                 Duplicate
-                <DropdownMenuShortcut className="text-white/40">
+                <DropdownMenuShortcut className="text-muted-foreground">
                   ⌘D
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-[#303030]" />
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-xs text-[#E56458] focus:!bg-[#DE5551] focus:!text-white focus:[&>svg]:!text-white focus:[&>[data-slot=dropdown-menu-shortcut]]:!text-white"
                 onSelect={() => {
@@ -946,7 +1074,7 @@ export function EventDetailPanel({
               >
                 <Trash2 className="size-3.5 text-[#E56458]" />
                 Delete
-                <DropdownMenuShortcut className="text-white/40 tracking-normal">
+                <DropdownMenuShortcut className="text-muted-foreground tracking-normal">
                   delete
                 </DropdownMenuShortcut>
               </DropdownMenuItem>
@@ -1120,14 +1248,6 @@ export function EventDetailPanel({
             <span className="text-foreground text-xs">All-day</span>
           </div>
 
-          {/* Timezone row — hidden when all-day */}
-          {!event.isAllDay && (
-            <div className="flex items-center gap-3 px-4">
-              <Globe className="size-4 shrink-0 text-[#C7C5C1] dark:text-[#595959]" />
-              <TimezoneDisplay timezone={event.timezone ?? "GMT-3 Sao Paulo"} />
-            </div>
-          )}
-
           {/* Recurrence editor */}
           <RecurrenceEditor event={event} onEventChange={onEventChange} />
         </>
@@ -1141,9 +1261,6 @@ export function EventDetailPanel({
               All-day
             </span>
             <span className="text-xs text-[#C7C5C1] dark:text-[#595959] dark:group-hover/options:text-[#636363]">
-              Time zone
-            </span>
-            <span className="text-xs text-[#C7C5C1] dark:text-[#595959] dark:group-hover/options:text-[#636363]">
               Repeat
             </span>
           </div>
@@ -1153,12 +1270,9 @@ export function EventDetailPanel({
       {/* Divider */}
       <div className="border-border border-t" />
 
-      {/* Field sections */}
+      {/* Location */}
       <div className="flex flex-col px-4">
-        <FieldRow icon={User} label="Participants and Rooms" />
-        <FieldRow icon={Video} label="Conferencing" />
-        <FieldRow icon={NotepadText} label="AI Meeting Notes and Docs" />
-        <FieldRow icon={MapPin} label="Location" value={event.location} />
+        <LocationField event={event} onEventChange={onEventChange} />
       </div>
 
       {/* Divider */}
@@ -1166,12 +1280,15 @@ export function EventDetailPanel({
 
       {/* Description */}
       <div className="flex flex-col gap-1 px-4">
-        <span className="text-xs text-[#C7C5C1] dark:text-[#595959]">
-          Description
-        </span>
-        {event.description && (
-          <span className="text-foreground text-xs">{event.description}</span>
-        )}
+        <textarea
+          value={event.description ?? ""}
+          onChange={(e) =>
+            onEventChange?.({ ...event, description: e.target.value })
+          }
+          placeholder="Description"
+          rows={2}
+          className="text-foreground placeholder:text-[#C7C5C1] dark:placeholder:text-[#595959] -mx-2 resize-none rounded-sm border border-transparent bg-transparent px-2 py-1.5 text-xs outline-none hover:border-input focus:border-ring focus:bg-accent focus-visible:ring-ring focus-visible:ring-1 dark:hover:border-[#373737] dark:focus:border-[#242424] dark:focus:bg-[#242424]"
+        />
       </div>
 
       {/* Divider */}
@@ -1201,14 +1318,11 @@ export function EventDetailPanel({
               <ChevronDown className="size-3 text-[#C7C5C1] dark:text-[#595959]" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="min-w-[160px] bg-[#252525] border-[#303030]"
-          >
+          <DropdownMenuContent align="start" className="min-w-[160px]">
             {calendars.map((cal) => (
               <DropdownMenuItem
                 key={cal.id}
-                className="text-xs text-white focus:bg-[#303030] focus:text-white"
+                className="text-xs"
                 onSelect={() => onEventChange?.({ ...event, calendarId: cal.id })}
               >
                 <div className={cn("size-3 rounded-xs", colorDotClass[cal.color])} />
@@ -1220,39 +1334,6 @@ export function EventDetailPanel({
         </DropdownMenu>
       </div>
 
-      {/* Status */}
-      <div className="mt-1 grid grid-cols-2 pl-9">
-        <span className="text-foreground text-xs font-medium capitalize">
-          {event.status ?? "Busy"}
-        </span>
-        <span className="text-foreground text-xs font-medium">
-          {formatVisibility(event.visibility)}
-        </span>
-      </div>
-
-      {/* Reminders */}
-      <div className="mt-1 flex flex-col gap-3 px-4">
-        <div className="flex items-center gap-2">
-          <Bell className="size-4 text-[#C7C5C1] dark:text-[#595959]" />
-          <span className="text-xs text-[#C7C5C1] dark:text-[#595959]">
-            Reminders
-          </span>
-        </div>
-        {event.reminders &&
-          event.reminders.length > 0 &&
-          event.reminders.map((reminder) => (
-            <span
-              key={`${reminder.amount}-${reminder.unit}`}
-              className="text-foreground pl-6 text-xs"
-            >
-              <span className="font-medium">
-                {reminder.amount}
-                {reminder.unit.replace(/s$/, "")}
-              </span>{" "}
-              before
-            </span>
-          ))}
-      </div>
     </div>
   );
 }

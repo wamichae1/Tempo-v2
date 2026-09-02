@@ -159,7 +159,16 @@ export function TempoCalendar() {
   );
 
   const selectedEvent = useMemo(
-    () => displayEvents.find((event) => event.id === selectedEventId),
+    () =>
+      selectedEventId == null
+        ? undefined
+        : displayEvents.find(
+            (event) =>
+              event.id === selectedEventId ||
+              // Keep the editor open when an open non-recurring event gains a
+              // recurrence rule: its occurrences get derived `baseId@@date` ids.
+              event.baseId === selectedEventId,
+          ),
     [displayEvents, selectedEventId],
   );
 
@@ -306,6 +315,7 @@ export function TempoCalendar() {
   const calendarDataValue = useMemo(
     () => ({
       calendars,
+      events,
       conflictIds,
       duplicateEvent: (event: CalendarEvent) => {
         const copy = duplicateEvent(event);
@@ -317,7 +327,15 @@ export function TempoCalendar() {
       getCalendar: (id: string | undefined) =>
         calendars.find((c) => c.id === id),
     }),
-    [calendars, conflictIds, duplicateEvent, copyEvent, handlePaste, clipboard],
+    [
+      calendars,
+      events,
+      conflictIds,
+      duplicateEvent,
+      copyEvent,
+      handlePaste,
+      clipboard,
+    ],
   );
 
   return (

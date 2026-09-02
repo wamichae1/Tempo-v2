@@ -11,6 +11,8 @@ import type { Calendar } from "@/features/calendar/types";
  */
 export interface CalendarDataContextValue {
   calendars: Calendar[];
+  /** All stored (unexpanded) events — used e.g. for location suggestions. */
+  events: CalendarEvent[];
   /** Ids of events currently in conflict (expanded occurrence ids). */
   conflictIds: Set<string>;
   duplicateEvent: (event: CalendarEvent) => void;
@@ -28,6 +30,7 @@ export interface CalendarDataContextValue {
 
 const CalendarDataContext = React.createContext<CalendarDataContextValue>({
   calendars: [],
+  events: [],
   conflictIds: new Set(),
   duplicateEvent: () => {},
   copyEvent: () => {},
