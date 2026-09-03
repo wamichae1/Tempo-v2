@@ -294,7 +294,7 @@ html.dark,
 
 @keyframes column-highlight-fade {
   from {
-    background-color: #602c2b;
+    background-color: color-mix(in srgb, var(--foreground) 25%, transparent);
   }
   to {
     background-color: transparent;

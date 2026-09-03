@@ -97,6 +97,10 @@ export function TempoCalendar() {
     canRedo,
   } = store;
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  /** The user's explicitly selected day (sidebar mini calendar highlight).
+   *  Only changes on explicit date selection or "Today" — never on
+   *  prev/next navigation or week/month view changes. */
+  const [selectedDay, setSelectedDay] = useState<Date>(() => new Date());
   const [visibleDays, setVisibleDays] = useState<Date[]>(() =>
     getVisibleDays(currentDate, "week"),
   );
@@ -205,6 +209,7 @@ export function TempoCalendar() {
   // --- Navigation ----------------------------------------------------------
 
   const goToToday = useCallback(() => {
+    setSelectedDay(new Date());
     setCurrentDate(
       view === "month"
         ? startOfMonth(new Date())
@@ -225,6 +230,7 @@ export function TempoCalendar() {
   }, [view]);
 
   const handleDateSelect = useCallback((date: Date) => {
+    setSelectedDay(date);
     setCurrentDate(() =>
       view === "month"
         ? startOfMonth(date)
@@ -236,6 +242,7 @@ export function TempoCalendar() {
   /** Jump to a date (search results, month "+N more"): switch to week view. */
   const jumpToDate = useCallback(
     (date: Date, eventId?: string) => {
+      setSelectedDay(date);
       setView("week");
       setCurrentDate(startOfWeek(date, { weekStartsOn: WEEK_STARTS_ON }));
       if (eventId) setSelectedEventId(eventId);
@@ -404,8 +411,8 @@ export function TempoCalendar() {
               miniCalendar={
                 <MiniCalendar
                   currentDate={currentDate}
-                  visibleDays={view === "week" ? visibleDays : []}
-                  selectedDate={currentDate}
+                  visibleDays={[]}
+                  selectedDate={selectedDay}
                   onSelect={(date) => jumpToDate(date)}
                   weekStartsOn={WEEK_STARTS_ON}
                   className="w-full max-w-[220px] p-0"
