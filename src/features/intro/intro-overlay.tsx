@@ -8,6 +8,9 @@ export interface IntroOverlayProps {
   onDismiss: () => void;
 }
 
+/** Base-aware public asset URL (respects Vite `base` for GitHub Pages). */
+const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
 /**
  * First-launch welcome surface. Full-screen glass over the workspace with
  * the Tempo wordmark, short orientation copy, and an interactive calendar
@@ -76,12 +79,12 @@ export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
           {/* Left: identity + copy */}
           <div className="max-w-md">
             <img
-              src="/intro/LogoB.svg"
+              src={asset("intro/LogoB.svg")}
               alt="Tempo"
               className="h-18 w-auto dark:hidden"
             />
             <img
-              src="/intro/LogoW.svg"
+              src={asset("intro/LogoW.svg")}
               alt=""
               aria-hidden="true"
               className="hidden h-18 w-auto dark:block"
@@ -122,14 +125,14 @@ export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
           <div className="w-full max-w-xl justify-self-center lg:max-w-none">
             <div className="overflow-hidden rounded-lg border dark:hidden">
               <CursorCalendarReveal
-                ghostSrc="/intro/GhostCalendar.svg"
-                revealSrc="/intro/RevealCalendar.svg"
+                ghostSrc={asset("intro/GhostCalendar.svg")}
+                revealSrc={asset("intro/RevealCalendar.svg")}
               />
             </div>
             <div className="hidden overflow-hidden rounded-lg border dark:block">
               <CursorCalendarReveal
-                ghostSrc="/intro/GhostCalendarDark.svg"
-                revealSrc="/intro/RevealCalendarDark.svg"
+                ghostSrc={asset("intro/GhostCalendarDark.svg")}
+                revealSrc={asset("intro/RevealCalendarDark.svg")}
               />
             </div>
             <p className="text-muted-foreground mt-3 text-center font-mono text-[11px] tracking-wider uppercase">
