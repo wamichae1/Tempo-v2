@@ -26,6 +26,8 @@ export interface CalendarDataContextValue {
   hasClipboard: boolean;
   /** Resolve a calendar by id. */
   getCalendar: (id: string | undefined) => Calendar | undefined;
+  /** Update a calendar (rename / recolor / visibility). */
+  updateCalendar: (calendar: Calendar) => void;
 }
 
 const CalendarDataContext = React.createContext<CalendarDataContextValue>({
@@ -37,6 +39,7 @@ const CalendarDataContext = React.createContext<CalendarDataContextValue>({
   pasteEvent: () => {},
   hasClipboard: false,
   getCalendar: () => undefined,
+  updateCalendar: () => {},
 });
 
 export function CalendarDataProvider({

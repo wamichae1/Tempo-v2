@@ -13,27 +13,13 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useCalendarData } from "@/features/calendar/calendar-data-context";
+import {
+  EVENT_COLORS,
+  EVENT_COLOR_DOT_CLASS,
+} from "@/features/calendar/types";
 import type { CalendarEvent, EventColor } from "./week-view-types";
 
-const EVENT_COLORS: EventColor[] = [
-  "red",
-  "orange",
-  "yellow",
-  "green",
-  "blue",
-  "purple",
-  "gray",
-];
-
-const colorSwatchClass: Record<EventColor, string> = {
-  red: "bg-event-red-border",
-  orange: "bg-event-orange-border",
-  yellow: "bg-event-yellow-border",
-  green: "bg-event-green-border",
-  blue: "bg-event-blue-border",
-  purple: "bg-event-purple-border",
-  gray: "bg-event-gray-border",
-};
+const colorSwatchClass = EVENT_COLOR_DOT_CLASS;
 
 interface EventContextMenuProps {
   event: CalendarEvent;
@@ -141,9 +127,20 @@ export function EventContextMenu({
   const menuRef = React.useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = React.useState(position);
   const [ready, setReady] = React.useState(false);
-  const currentColor = event.color ?? "blue";
-  const { calendars, duplicateEvent, copyEvent, pasteEvent, hasClipboard } =
-    useCalendarData();
+  const {
+    calendars,
+    duplicateEvent,
+    copyEvent,
+    pasteEvent,
+    hasClipboard,
+    getCalendar,
+    updateCalendar,
+  } = useCalendarData();
+  // Color identity lives on the calendar: the swatch row recolors the
+  // event's calendar, so every event on it updates together. Events without
+  // a calendar fall back to their own stored color.
+  const eventCalendar = getCalendar(event.calendarId);
+  const currentColor = eventCalendar?.color ?? event.color ?? "blue";
 
   React.useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -187,7 +184,11 @@ export function EventContextMenu({
   }, [onClose]);
 
   function handleColorSelect(color: EventColor) {
-    onEventChange?.({ ...event, color });
+    if (eventCalendar) {
+      updateCalendar({ ...eventCalendar, color });
+    } else {
+      onEventChange?.({ ...event, color });
+    }
     onClose();
   }
 

@@ -19,7 +19,7 @@ def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: print("CONSOLE:", m.text) if m.text.startswith("[") else None)
         page.goto(BASE, wait_until="networkidle")
-        page.evaluate("localStorage.clear()")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 

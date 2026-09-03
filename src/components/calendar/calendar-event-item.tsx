@@ -57,6 +57,20 @@ export const eventColorStyles: Record<
     borderLine: "border-event-green-border",
     text: "text-event-green",
   },
+  teal: {
+    bg: "bg-event-teal-bg",
+    bgHover: "hover:bg-event-teal-bg/70",
+    border: "bg-event-teal-border",
+    borderLine: "border-event-teal-border",
+    text: "text-event-teal",
+  },
+  cyan: {
+    bg: "bg-event-cyan-bg",
+    bgHover: "hover:bg-event-cyan-bg/70",
+    border: "bg-event-cyan-border",
+    borderLine: "border-event-cyan-border",
+    text: "text-event-cyan",
+  },
   blue: {
     bg: "bg-event-blue-bg",
     bgHover: "hover:bg-event-blue-bg/70",
@@ -64,12 +78,26 @@ export const eventColorStyles: Record<
     borderLine: "border-event-blue-border",
     text: "text-event-blue",
   },
+  indigo: {
+    bg: "bg-event-indigo-bg",
+    bgHover: "hover:bg-event-indigo-bg/70",
+    border: "bg-event-indigo-border",
+    borderLine: "border-event-indigo-border",
+    text: "text-event-indigo",
+  },
   purple: {
     bg: "bg-event-purple-bg",
     bgHover: "hover:bg-event-purple-bg/70",
     border: "bg-event-purple-border",
     borderLine: "border-event-purple-border",
     text: "text-event-purple",
+  },
+  pink: {
+    bg: "bg-event-pink-bg",
+    bgHover: "hover:bg-event-pink-bg/70",
+    border: "bg-event-pink-border",
+    borderLine: "border-event-pink-border",
+    text: "text-event-pink",
   },
   gray: {
     bg: "bg-event-gray-bg",

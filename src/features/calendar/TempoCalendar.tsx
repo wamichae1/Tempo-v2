@@ -9,14 +9,6 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Redo2,
-  Undo2,
-} from "lucide-react";
 
 import {
   WeekView,
@@ -26,42 +18,55 @@ import {
   type ViewType,
 } from "@/components/calendar";
 import { MonthView } from "@/components/calendar/month-view";
-import { MiniCalendar } from "@/components/calendar/mini-calendar";
-import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   createEventId,
   useCalendarEvents,
 } from "@/features/calendar/use-calendar-events";
 import { CalendarDataProvider } from "@/features/calendar/calendar-data-context";
 import { CalendarSidebar } from "@/features/calendar/calendar-sidebar";
-import { SearchPopover } from "@/features/calendar/search-popover";
+import { CalendarHeader } from "@/features/calendar/calendar-header";
+import { useCalendarShortcuts } from "@/features/calendar/use-calendar-shortcuts";
+import { WorkspaceLayout } from "@/features/workspace/workspace-layout";
+import { WorkspaceTabs } from "@/features/workspace/workspace-tabs";
+import { AssistantPanel } from "@/features/assistant/assistant-panel";
 import { useAgentTools } from "@/features/agent/use-agent-tools";
-import { AgentPanel } from "@/features/agent/agent-panel";
 import { AgentConfirmDialog } from "@/features/agent/agent-confirm-dialog";
+import { IntroOverlay } from "@/features/intro/intro-overlay";
+import { useIntro } from "@/features/intro/use-intro";
+import { useTheme } from "@/hooks/use-theme";
 import { expandEvents } from "@/lib/recurrence";
 import { findConflictingEventIds } from "@/lib/conflicts";
 
-const WEEK_STARTS_ON = 0;
+const WEEK_STARTS_ON = 0 as const;
 const LS_VIEW = "tempo:view";
+const LS_PANELS = "tempo:panels";
 
 type MainView = Extract<ViewType, "week" | "month">;
 
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+interface PanelState {
+  sidebar: boolean;
+  assistant: boolean;
+}
+
+function loadPanelState(): PanelState {
+  try {
+    const raw = localStorage.getItem(LS_PANELS);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PanelState>;
+      return {
+        sidebar: parsed.sidebar !== false,
+        assistant: parsed.assistant !== false,
+      };
+    }
+  } catch {
+    // fall through to defaults
+  }
+  // Small screens: start with both panels collapsed to prioritize the
+  // calendar; the user can open them as overlays-width panels.
+  if (typeof window !== "undefined" && window.innerWidth < 1024) {
+    return { sidebar: false, assistant: false };
+  }
+  return { sidebar: true, assistant: true };
 }
 
 export function TempoCalendar() {
@@ -74,6 +79,8 @@ export function TempoCalendar() {
   );
   const store = useCalendarEvents();
   const agent = useAgentTools(store);
+  const { theme, cycleTheme } = useTheme();
+  const { introOpen, dismissIntro, reopenIntro } = useIntro();
   const {
     events,
     calendars,
@@ -95,10 +102,28 @@ export function TempoCalendar() {
   );
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [highlightedDate, setHighlightedDate] = useState<Date | null>(null);
+  const [panels, setPanels] = useState<PanelState>(loadPanelState);
 
   useEffect(() => {
     localStorage.setItem(LS_VIEW, view);
   }, [view]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_PANELS, JSON.stringify(panels));
+    } catch {
+      // storage unavailable — keep in memory
+    }
+  }, [panels]);
+
+  const toggleSidebar = useCallback(
+    () => setPanels((p) => ({ ...p, sidebar: !p.sidebar })),
+    [],
+  );
+  const toggleAssistant = useCallback(
+    () => setPanels((p) => ({ ...p, assistant: !p.assistant })),
+    [],
+  );
 
   /**
    * Switch views, re-anchoring the date so the target view shows the bulk of
@@ -137,13 +162,18 @@ export function TempoCalendar() {
       calendars.filter((c) => !c.visible).map((c) => c.id),
     );
 
+    // Calendar color is the event's visual identity: it always wins over a
+    // stored per-event color. The event's own color is kept in the data model
+    // (ICS round-trip) and used only as a fallback when the calendar is gone.
     return expandEvents(events, rangeStart, rangeEnd)
       .filter((e) => !hiddenCalendars.has(e.calendarId ?? ""))
-      .map((e) =>
-        e.color
-          ? e
-          : { ...e, color: colorByCalendar.get(e.calendarId ?? "") ?? "blue" },
-      );
+      .map((e): CalendarEvent => {
+        const calendarColor = colorByCalendar.get(e.calendarId ?? "");
+        if (calendarColor && calendarColor !== e.color) {
+          return { ...e, color: calendarColor };
+        }
+        return e.color ? e : { ...e, color: "blue" };
+      });
   }, [events, calendars, currentDate, view]);
 
   const conflictIds = useMemo(
@@ -277,40 +307,19 @@ export function TempoCalendar() {
     [clipboard, pasteEvent],
   );
 
-  // --- Keyboard shortcuts: undo/redo + copy/paste/duplicate ----------------
+  // --- Keyboard shortcuts ---------------------------------------------------
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-
-      if (key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-        return;
-      }
-      if ((key === "z" && e.shiftKey) || key === "y") {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      if (isTypingTarget(e.target)) return;
-
-      if (key === "c" && selectedEvent) {
-        e.preventDefault();
-        copyEvent(selectedEvent);
-      } else if (key === "d" && selectedEvent) {
-        e.preventDefault();
-        duplicateEvent(selectedEvent);
-      } else if (key === "v" && clipboard) {
-        e.preventDefault();
-        handlePaste(selectedEvent?.start ?? currentDate);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [undo, redo, selectedEvent, copyEvent, duplicateEvent, clipboard, handlePaste, currentDate]);
+  useCalendarShortcuts({
+    undo,
+    redo,
+    selectedEvent,
+    copyEvent,
+    duplicateEvent,
+    clipboard,
+    paste: () => handlePaste(selectedEvent?.start ?? currentDate),
+    toggleSidebar,
+    toggleAssistant,
+  });
 
   const calendarDataValue = useMemo(
     () => ({
@@ -326,11 +335,13 @@ export function TempoCalendar() {
       hasClipboard: clipboard !== null,
       getCalendar: (id: string | undefined) =>
         calendars.find((c) => c.id === id),
+      updateCalendar: store.updateCalendar,
     }),
     [
       calendars,
       events,
       conflictIds,
+      store.updateCalendar,
       duplicateEvent,
       copyEvent,
       handlePaste,
@@ -341,120 +352,64 @@ export function TempoCalendar() {
   return (
     <CalendarDataProvider value={calendarDataValue}>
       <main className="bg-background text-foreground flex h-svh min-h-0 flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-          <div className="flex min-w-0 items-baseline gap-3">
-            <span className="text-sm font-semibold tracking-tight">Tempo</span>
-            <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="hover:bg-accent flex items-center gap-1 rounded-md px-2 py-1 transition-colors"
-                  title="Choose a date"
-                >
-                  <h1 className="truncate text-xl font-semibold tracking-tight">
-                    {monthName} {year}
-                  </h1>
-                  <ChevronDown className="text-muted-foreground size-4" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-auto p-0">
-                <MiniCalendar
-                  currentDate={headerDate}
-                  visibleDays={view === "week" ? visibleDays : []}
-                  onSelect={handleDateSelect}
-                  weekStartsOn={WEEK_STARTS_ON}
-                />
-              </PopoverContent>
-            </Popover>
-            {view === "week" && (
-              <span className="text-muted-foreground hidden text-xs sm:inline">
-                Week {weekNumber}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <AgentPanel agent={agent} />
-            <SearchPopover
-              events={events}
+        <CalendarHeader
+          view={view}
+          monthName={monthName}
+          year={year}
+          weekNumber={weekNumber}
+          headerDate={headerDate}
+          visibleDays={visibleDays}
+          weekStartsOn={WEEK_STARTS_ON}
+          datePickerOpen={datePickerOpen}
+          onDatePickerOpenChange={setDatePickerOpen}
+          onDateSelect={handleDateSelect}
+          onSwitchView={switchView}
+          onCreateEvent={handleCreateEvent}
+          onToday={goToToday}
+          onPrevious={goToPrevious}
+          onNext={goToNext}
+          undo={undo}
+          redo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          events={events}
+          calendars={calendars}
+          onSelectSearchResult={(event) => jumpToDate(event.start, event.id)}
+          theme={theme}
+          onCycleTheme={cycleTheme}
+          onToggleSidebar={toggleSidebar}
+          onToggleAssistant={toggleAssistant}
+          onShowIntro={reopenIntro}
+        />
+        <WorkspaceLayout
+          sidebarCollapsed={!panels.sidebar}
+          assistantCollapsed={!panels.assistant}
+          onSidebarCollapsedChange={(collapsed) =>
+            setPanels((p) => ({ ...p, sidebar: !collapsed }))
+          }
+          onAssistantCollapsedChange={(collapsed) =>
+            setPanels((p) => ({ ...p, assistant: !collapsed }))
+          }
+          sidebar={
+            <CalendarSidebar
               calendars={calendars}
-              onSelectResult={(event) => jumpToDate(event.start, event.id)}
+              events={events}
+              addCalendar={store.addCalendar}
+              updateCalendar={store.updateCalendar}
+              deleteCalendar={(id) => {
+                store.deleteCalendar(id);
+                setSelectedEventId(null);
+              }}
+              importEvents={store.importEvents}
             />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={undo}
-              disabled={!canUndo}
-              title="Undo (Ctrl+Z)"
-            >
-              <Undo2 className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={redo}
-              disabled={!canRedo}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              <Redo2 className="size-4" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="sm">
-                  {view === "week" ? "Week" : "Month"}
-                  <ChevronDown className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => switchView("week")}>
-                  Week
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => switchView("month")}>
-                  Month
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="secondary" size="sm" onClick={handleCreateEvent}>
-              <Plus className="size-4" />
-              New event
-            </Button>
-            <Button variant="secondary" size="sm" onClick={goToToday}>
-              Today
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={goToPrevious}
-            >
-              <ChevronLeft className="size-4" />
-              <span className="sr-only">Previous</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={goToNext}
-            >
-              <ChevronRight className="size-4" />
-              <span className="sr-only">Next</span>
-            </Button>
-          </div>
-        </header>
-        <div className="flex min-h-0 flex-1">
-          <CalendarSidebar
-            calendars={calendars}
-            events={events}
-            addCalendar={store.addCalendar}
-            updateCalendar={store.updateCalendar}
-            deleteCalendar={(id) => {
-              store.deleteCalendar(id);
-              setSelectedEventId(null);
-            }}
-            importEvents={store.importEvents}
+          }
+          assistant={<AssistantPanel agent={agent} />}
+        >
+          <WorkspaceTabs
+            assistantOpen={panels.assistant}
+            onToggleAssistant={toggleAssistant}
           />
-          <div className="min-w-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             {view === "week" ? (
               <WeekView
                 view="week"
@@ -471,6 +426,9 @@ export function TempoCalendar() {
                 onPrevWeek={goToPrevious}
                 onNextWeek={goToNext}
                 highlightedDate={highlightedDate}
+                // The left workspace sidebar is a calendar list, not the
+                // event-detail sidebar this flag refers to — keep false so the
+                // detail popover opens on selection.
                 isSidebarOpen={false}
               />
             ) : (
@@ -486,10 +444,11 @@ export function TempoCalendar() {
               />
             )}
           </div>
-        </div>
+        </WorkspaceLayout>
         {agent.pendingConfirmation && (
           <AgentConfirmDialog confirmation={agent.pendingConfirmation} />
         )}
+        {introOpen && <IntroOverlay onDismiss={dismissIntro} />}
       </main>
     </CalendarDataProvider>
   );

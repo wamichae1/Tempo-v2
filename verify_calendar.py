@@ -28,7 +28,7 @@ def main():
         page.wait_for_timeout(800)
 
         # Fresh state
-        page.evaluate("localStorage.clear()")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 

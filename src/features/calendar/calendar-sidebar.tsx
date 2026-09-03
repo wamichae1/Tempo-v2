@@ -11,6 +11,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { TempoDialog } from "@/components/ui/tempo-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,18 +22,14 @@ import {
 import type { CalendarEvent, EventColor } from "@/components/calendar";
 import { createEventId } from "@/features/calendar/use-calendar-events";
 import type { Calendar } from "@/features/calendar/types";
-import { EVENT_COLORS, createCalendarId } from "@/features/calendar/types";
+import {
+  EVENT_COLORS,
+  EVENT_COLOR_DOT_CLASS,
+  createCalendarId,
+} from "@/features/calendar/types";
 import { downloadICS, generateICS, parseICS } from "@/lib/ics";
 
-const colorDotClass: Record<EventColor, string> = {
-  red: "bg-event-red-border",
-  orange: "bg-event-orange-border",
-  yellow: "bg-event-yellow-border",
-  green: "bg-event-green-border",
-  blue: "bg-event-blue-border",
-  purple: "bg-event-purple-border",
-  gray: "bg-event-gray-border",
-};
+const colorDotClass = EVENT_COLOR_DOT_CLASS;
 
 export interface CalendarSidebarProps {
   calendars: Calendar[];
@@ -41,6 +38,8 @@ export interface CalendarSidebarProps {
   updateCalendar: (calendar: Calendar) => void;
   deleteCalendar: (calendarId: string) => void;
   importEvents: (events: CalendarEvent[], calendarId: string) => void;
+  /** Optional mini month calendar rendered at the top of the sidebar. */
+  miniCalendar?: React.ReactNode;
   className?: string;
 }
 
@@ -55,6 +54,7 @@ export function CalendarSidebar({
   updateCalendar,
   deleteCalendar,
   importEvents,
+  miniCalendar,
   className,
 }: CalendarSidebarProps) {
   const [creating, setCreating] = React.useState(false);
@@ -65,6 +65,18 @@ export function CalendarSidebar({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   /** Calendar chosen as the target for the next import (default: first). */
   const [importTargetId, setImportTargetId] = React.useState<string | null>(null);
+  /** Whether the general "Import .ics" destination picker is open. */
+  const [importPickerOpen, setImportPickerOpen] = React.useState(false);
+  /** Calendar id pending deletion confirmation (null = dialog closed). */
+  const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null);
+
+  /** Default import destination: first visible calendar, else first. */
+  const defaultImportTarget =
+    calendars.find((c) => c.visible) ?? calendars[0];
+
+  const pendingDeleteCalendar = pendingDeleteId
+    ? calendars.find((c) => c.id === pendingDeleteId)
+    : undefined;
 
   const eventCountByCalendar = React.useMemo(() => {
     const map = new Map<string, number>();
@@ -144,12 +156,17 @@ export function CalendarSidebar({
   return (
     <aside
       className={cn(
-        "flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r p-3",
+        "flex h-full w-full flex-col gap-1 overflow-y-auto p-3",
         className,
       )}
     >
+      {miniCalendar && (
+        <div className="mb-2 flex justify-center border-b pb-3">
+          {miniCalendar}
+        </div>
+      )}
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+        <span className="label-mono text-muted-foreground">
           Calendars
         </span>
         <Button
@@ -183,7 +200,7 @@ export function CalendarSidebar({
               />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-0 p-1">
-              <div className="flex gap-1.5 p-1">
+              <div className="flex max-w-[180px] flex-wrap gap-1.5 p-1">
                 {EVENT_COLORS.map((color) => (
                   <button
                     key={color}
@@ -262,15 +279,7 @@ export function CalendarSidebar({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive"
-                onSelect={() => {
-                  const count = eventCountByCalendar.get(calendar.id) ?? 0;
-                  const ok =
-                    count === 0 ||
-                    window.confirm(
-                      `Delete "${calendar.name}" and its ${count} event${count === 1 ? "" : "s"}?`,
-                    );
-                  if (ok) deleteCalendar(calendar.id);
-                }}
+                onSelect={() => setPendingDeleteId(calendar.id)}
               >
                 <Trash2 className="size-3.5" /> Delete
               </DropdownMenuItem>
@@ -306,8 +315,11 @@ export function CalendarSidebar({
           size="sm"
           className="justify-start text-xs"
           onClick={() => {
-            setImportTargetId(null);
-            fileInputRef.current?.click();
+            if (calendars.length === 0) {
+              setNotice("Create a calendar before importing events.");
+              return;
+            }
+            setImportPickerOpen(true);
           }}
         >
           <Upload className="size-3.5" /> Import .ics…
@@ -336,6 +348,101 @@ export function CalendarSidebar({
           e.target.value = "";
         }}
       />
+
+      {/* General ICS import: choose the destination calendar first. */}
+      <TempoDialog
+        open={importPickerOpen}
+        onClose={() => setImportPickerOpen(false)}
+        title="Import events to"
+        description="Choose which calendar the imported events belong to."
+        widthClass="w-[280px]"
+      >
+        <div
+          className="mt-2 flex flex-col"
+          role="listbox"
+          aria-label="Destination calendar"
+        >
+          {calendars.map((calendar) => {
+            const selected = calendar.id === defaultImportTarget?.id;
+            return (
+              <button
+                key={calendar.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={cn(
+                  "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
+                  "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
+                )}
+                onClick={() => {
+                  setImportTargetId(calendar.id);
+                  setImportPickerOpen(false);
+                  // Open the file picker on the next frame so the dialog has
+                  // closed before the native file dialog appears.
+                  requestAnimationFrame(() => fileInputRef.current?.click());
+                }}
+              >
+                <span
+                  className={cn(
+                    "size-2.5 shrink-0 rounded-xs",
+                    colorDotClass[calendar.color],
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate">{calendar.name}</span>
+                {selected && (
+                  <Check className="text-muted-foreground size-3.5" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setImportPickerOpen(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      </TempoDialog>
+
+      {/* Delete calendar confirmation. */}
+      <TempoDialog
+        open={pendingDeleteCalendar !== undefined}
+        onClose={() => setPendingDeleteId(null)}
+        title={`Delete "${pendingDeleteCalendar?.name ?? ""}"?`}
+        description={(() => {
+          const count = pendingDeleteCalendar
+            ? (eventCountByCalendar.get(pendingDeleteCalendar.id) ?? 0)
+            : 0;
+          return count > 0
+            ? `This will permanently delete the calendar and its ${count} event${count === 1 ? "" : "s"}.`
+            : "This will permanently delete the calendar.";
+        })()}
+      >
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setPendingDeleteId(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              if (pendingDeleteCalendar) {
+                deleteCalendar(pendingDeleteCalendar.id);
+              }
+              setPendingDeleteId(null);
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      </TempoDialog>
     </aside>
   );
 }

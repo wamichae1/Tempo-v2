@@ -24,6 +24,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useCalendarData } from "@/features/calendar/calendar-data-context";
+import { EVENT_COLOR_DOT_CLASS } from "@/features/calendar/types";
 import {
   describeRecurrence,
   isWeekdayRule,
@@ -47,7 +48,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { MiniCalendar } from "@/components/calendar/mini-calendar";
 import { createEventHistoryLocationProvider } from "@/lib/location-suggestions";
-import type { CalendarEvent, EventColor } from "./week-view-types";
+import type { CalendarEvent } from "./week-view-types";
 
 interface EventDetailPanelProps {
   event: CalendarEvent;
@@ -60,15 +61,7 @@ interface EventDetailPanelProps {
   headerActions?: React.ReactNode;
 }
 
-const colorDotClass: Record<EventColor, string> = {
-  red: "bg-event-red-border",
-  orange: "bg-event-orange-border",
-  yellow: "bg-event-yellow-border",
-  green: "bg-event-green-border",
-  blue: "bg-event-blue-border",
-  purple: "bg-event-purple-border",
-  gray: "bg-event-gray-border",
-};
+const colorDotClass = EVENT_COLOR_DOT_CLASS;
 
 function formatDuration(start: Date, end: Date): string {
   const totalMinutes = differenceInMinutes(end, start);

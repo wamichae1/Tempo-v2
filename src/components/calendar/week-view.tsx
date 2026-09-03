@@ -32,6 +32,9 @@ import { CalendarPopoverBoundaryProvider } from "./calendar-popover-context";
 /** Minimum height of each hour row in pixels */
 const MIN_HOUR_HEIGHT = 48;
 
+/** Hour of day the grid scrolls to on first open (working-hours start). */
+const DEFAULT_SCROLL_HOUR = 6;
+
 /** Width of the time axis column in pixels (4rem = 64px) */
 export const TIME_AXIS_WIDTH = 64;
 
@@ -211,6 +214,77 @@ export function WeekView({
     }
     return () => observer.disconnect();
   }, [VISIBLE_DAYS]);
+
+  /**
+   * Track genuine user scrolling (wheel / touch) so programmatic scrolls
+   * (initial 6 AM position, keeping the selected event visible) never count
+   * as the user choosing a position.
+   */
+  const userScrolledRef = React.useRef(false);
+  React.useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const markUserScroll = () => {
+      userScrolledRef.current = true;
+    };
+    container.addEventListener("wheel", markUserScroll, { passive: true });
+    container.addEventListener("touchmove", markUserScroll, {
+      passive: true,
+    });
+    return () => {
+      container.removeEventListener("wheel", markUserScroll);
+      container.removeEventListener("touchmove", markUserScroll);
+    };
+  }, []);
+
+  /**
+   * Initial vertical position: scroll the grid to ~6 AM so the working day
+   * is immediately visible instead of starting at midnight. Runs once per
+   * mount (the view remounts when switching between week/month), only when
+   * the grid actually overflows, and never after the user has scrolled.
+   */
+  const initialScrollDoneRef = React.useRef(false);
+  React.useEffect(() => {
+    if (initialScrollDoneRef.current || userScrolledRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container || hourHeight <= 0) return;
+    if (container.scrollHeight <= container.clientHeight) return;
+    initialScrollDoneRef.current = true;
+    container.scrollTop = DEFAULT_SCROLL_HOUR * hourHeight;
+  }, [hourHeight]);
+
+  /**
+   * When an event is selected (e.g. New Event), make sure it is inside the
+   * visible scroll area so its editor popover opens next to a visible
+   * anchor instead of below the fold. Only scrolls when the event is not
+   * already fully visible.
+   */
+  React.useEffect(() => {
+    if (!selectedEventId) return;
+    const container = scrollContainerRef.current;
+    if (!container || hourHeight <= 0) return;
+    const event = timedEvents.find((e) => e.id === selectedEventId);
+    if (!event) return;
+
+    const startMinutes =
+      event.start.getHours() * 60 + event.start.getMinutes();
+    let endMinutes = event.end.getHours() * 60 + event.end.getMinutes();
+    if (endMinutes <= startMinutes) endMinutes = 24 * 60;
+    const top = (startMinutes / 60) * hourHeight;
+    const bottom = (endMinutes / 60) * hourHeight;
+
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+    if (top >= viewTop && bottom <= viewBottom) return; // already visible
+
+    const margin = hourHeight;
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    // Prefer showing the event with a margin above; if the event is taller
+    // than the viewport, align its top.
+    const target = Math.min(Math.max(top - margin, 0), Math.max(maxScroll, 0));
+    container.scrollTo({ top: target, behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEventId, hourHeight]);
 
   // Track whether navigation was initiated by scroll (to avoid double-animation)
   const scrollNavigatedRef = React.useRef(false);

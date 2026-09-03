@@ -19,7 +19,7 @@ export function AgentConfirmDialog({
       aria-modal="true"
       aria-label={confirmation.title}
     >
-      <div className="bg-background w-80 rounded-lg border p-4 shadow-lg">
+      <div className="bg-card w-80 rounded-lg border p-4 shadow-sm">
         <div className="mb-2 flex items-center gap-2">
           <Bot className="text-muted-foreground size-4" />
           <h2 className="text-sm font-semibold">{confirmation.title}</h2>

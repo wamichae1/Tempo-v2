@@ -102,8 +102,12 @@ export type EventColor =
   | "orange"
   | "yellow"
   | "green"
+  | "teal"
+  | "cyan"
   | "blue"
+  | "indigo"
   | "purple"
+  | "pink"
   | "gray";
 
 /**

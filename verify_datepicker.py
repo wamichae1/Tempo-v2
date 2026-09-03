@@ -12,7 +12,7 @@ def main():
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(BASE, wait_until="networkidle")
-        page.evaluate("localStorage.clear()")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 

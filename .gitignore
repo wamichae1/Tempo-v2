@@ -7,16 +7,56 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Environment / secrets
+# Real env files stay local; committed templates like .env.example are allowed.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Certificates / credentials
+*.pem
+*.key
+*.p12
+*.pfx
+
+# AI / agent tool output and state
+graphify-out/
+.claude/
+.codex/
+.agents/
+.kimi/
+.cursor/
+.aider*
+
+# Browser automation / test artifacts
+playwright-report/
+test-results/
+screenshots/
+
+# Debug/test screenshots (project-specific generated captures)
+intro_dark.png
+intro_light.png
+intro_mobile.png
+
 node_modules
 dist
 dist-ssr
 *.local
+
+# Caches / temp
+.cache/
+.tmp/
+tmp/
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
