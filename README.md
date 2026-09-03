@@ -55,6 +55,7 @@ Tempo exposes its calendar functionality through [WebMCP](https://webmachinelear
 - Destructive actions (deleting events or calendars) can require an in-app user confirmation, with a timeout, before they execute.
 - WebMCP support is feature-detected at runtime — Tempo works fine in browsers without `document.modelContext`; the Agent Link panel simply reflects availability.
 - Tempo does not bundle its own AI model, and no agent is permanently connected. The in-app Agent Link panel is an interface for inspecting and managing the registered WebMCP tools.
+- Built with and adapted from [CalendarCN](https://github.com/vmnog/calendarcn), an open-source React calendar component. Tempo incorporates and modifies several of its calendar UI elements.
 
 ## Tech stack
 
