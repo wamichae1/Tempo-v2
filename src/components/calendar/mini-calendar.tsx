@@ -29,6 +29,8 @@ interface MiniCalendarProps {
   onSelect: (date: Date) => void;
   /** Number of days the week starts on (0 = Sunday). */
   weekStartsOn?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  /** Optional class override for the root (e.g. compact sidebar sizing). */
+  className?: string;
 }
 
 /**
@@ -41,6 +43,7 @@ export function MiniCalendar({
   selectedDate,
   onSelect,
   weekStartsOn = 0,
+  className,
 }: MiniCalendarProps) {
   const [displayedMonth, setDisplayedMonth] = React.useState(() =>
     startOfMonth(currentDate),
@@ -70,7 +73,7 @@ export function MiniCalendar({
     visibleDays.some((visible) => isSameDay(visible, day));
 
   return (
-    <div className="w-[240px] select-none p-3">
+    <div className={cn("w-[240px] select-none p-3", className)}>
       <div className="flex items-center justify-between pb-2">
         <span className="text-xs font-medium">
           {format(displayedMonth, "MMMM yyyy")}

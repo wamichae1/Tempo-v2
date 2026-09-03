@@ -69,7 +69,7 @@ def main():
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(BASE, wait_until="networkidle")
-        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1')")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1'); localStorage.setItem('tempo:calendars', JSON.stringify([{id:'cal-personal',name:'Personal',color:'purple',visible:true},{id:'cal-university',name:'University',color:'green',visible:true},{id:'cal-work',name:'Work',color:'blue',visible:true}])); localStorage.setItem('tempo:events','[]')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 
@@ -85,11 +85,46 @@ def main():
         }
         check("tools registered", expected.issubset(names), f"{len(names)} tools: missing {expected - names}")
 
-        # 2. Agent panel shows supported + tool list
-        page.get_by_role("button", name="Agent Link").click()
-        page.wait_for_timeout(300)
-        check("panel shows tools", page.locator("text=tempo_create_event").count() >= 1)
+        # 2. Agent panel: inspector shows status, all 14 tools, no chat UI
+        create_row = page.locator("button:has-text('tempo_create_event')").first
+        if not create_row.is_visible():
+            page.get_by_role("button", name="Tempo Agent").click()
+            page.wait_for_timeout(300)
+        check("panel status available", page.locator("text=Available").count() >= 1)
+        check("panel tool count copy", page.locator("text=14 tools available").count() >= 1)
+        for section in ("READ", "WRITE", "HISTORY"):
+            check(f"panel section {section}", page.locator(f"section[aria-label='{section} tools']").count() == 1)
+        missing = [n for n in expected if page.locator(f"text={n}").count() == 0]
+        check("panel lists all 14 tools", not missing, f"missing: {missing}")
+        check("panel shows descriptions", page.locator("text=Create a new calendar event").count() >= 1)
+        check("no chat composer", page.locator("textarea").count() == 0
+              and page.get_by_role("button", name="Send").count() == 0)
+        # Expand create event -> parameter details
+        create_row.click()
+        page.wait_for_timeout(200)
+        check("expand shows params", page.locator("text=Parameters").count() >= 1
+              and page.locator("text=required").count() >= 1)
+        # Confirmation-protected badge present for delete tools
+        check("confirm badges", page.locator("text=CONFIRM").count() >= 2)
+        # Confirmation toggle still present and wired
+        toggle = page.locator("input[type=checkbox]")
+        check("confirm toggle present", toggle.count() >= 1)
         page.keyboard.press("Escape")
+
+        # 2b. Without WebMCP: compact empty state, no tool list
+        ctx2 = browser.new_context(viewport={"width": 1400, "height": 900})
+        page2 = ctx2.new_page()
+        page2.goto(BASE, wait_until="networkidle")
+        page2.evaluate("localStorage.setItem('tempo:intro-seen','1')")
+        page2.reload(wait_until="networkidle")
+        page2.wait_for_timeout(500)
+        if page2.locator("text=compatible agent/browser environment").count() == 0:
+            page2.get_by_role("button", name="Tempo Agent").click()
+            page2.wait_for_timeout(300)
+        check("unsupported: empty state", page2.locator("text=WebMCP").count() >= 1
+              and page2.locator("text=compatible agent/browser environment").count() >= 1)
+        check("unsupported: no tool list", page2.locator("text=tempo_create_event").count() == 0)
+        ctx2.close()
 
         # 3. List calendars
         res = call_tool(page, "tempo_list_calendars")
@@ -192,7 +227,7 @@ def main():
 
         page.evaluate(evaljs, ["tempo_delete_calendar", {"calendarId": new_cal}])
         page.wait_for_selector("text=The agent wants to delete the calendar")
-        page.get_by_role("button", name="Delete calendar").click()
+        page.get_by_role("button", name="Delete calendar", exact=True).click()
         page.wait_for_timeout(300)
         res = page.evaluate("window.__delResult.then((r) => JSON.parse(r))")
         check("delete_calendar", res.get("ok"))

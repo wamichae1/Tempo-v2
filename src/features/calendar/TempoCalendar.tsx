@@ -17,6 +17,7 @@ import {
   type CalendarEvent,
   type ViewType,
 } from "@/components/calendar";
+import { MiniCalendar } from "@/components/calendar/mini-calendar";
 import { MonthView } from "@/components/calendar/month-view";
 import {
   createEventId,
@@ -27,8 +28,7 @@ import { CalendarSidebar } from "@/features/calendar/calendar-sidebar";
 import { CalendarHeader } from "@/features/calendar/calendar-header";
 import { useCalendarShortcuts } from "@/features/calendar/use-calendar-shortcuts";
 import { WorkspaceLayout } from "@/features/workspace/workspace-layout";
-import { WorkspaceTabs } from "@/features/workspace/workspace-tabs";
-import { AssistantPanel } from "@/features/assistant/assistant-panel";
+import { AgentPanel } from "@/features/agent/agent-panel";
 import { useAgentTools } from "@/features/agent/use-agent-tools";
 import { AgentConfirmDialog } from "@/features/agent/agent-confirm-dialog";
 import { IntroOverlay } from "@/features/intro/intro-overlay";
@@ -401,14 +401,20 @@ export function TempoCalendar() {
                 setSelectedEventId(null);
               }}
               importEvents={store.importEvents}
+              miniCalendar={
+                <MiniCalendar
+                  currentDate={currentDate}
+                  visibleDays={view === "week" ? visibleDays : []}
+                  selectedDate={currentDate}
+                  onSelect={(date) => jumpToDate(date)}
+                  weekStartsOn={WEEK_STARTS_ON}
+                  className="w-full max-w-[220px] p-0"
+                />
+              }
             />
           }
-          assistant={<AssistantPanel agent={agent} />}
+          assistant={<AgentPanel agent={agent} />}
         >
-          <WorkspaceTabs
-            assistantOpen={panels.assistant}
-            onToggleAssistant={toggleAssistant}
-          />
           <div className="min-h-0 min-w-0 flex-1">
             {view === "week" ? (
               <WeekView

@@ -23,7 +23,7 @@ Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-cla
 - **Undo/redo** across all mutations
 - **Conflict detection** for overlapping events
 - **LocalStorage persistence** — your data survives reloads, locally
-- **AI Assistant panel** with an Agent Link interface for the WebMCP tools
+- **Tempo Agent panel** with an Agent Link interface for the WebMCP tools
 - **Responsive workspace** with resizable panels and dark/light themes
 
 ## WebMCP / Agent Link
@@ -89,7 +89,7 @@ src/
   components/ui/         # shadcn-style primitives (button, popover, dropdown, switch, dialog)
   features/calendar/     # Calendar store, hooks, header, sidebar, search (the single source of truth)
   features/workspace/    # Resizable workspace layout and tabs
-  features/assistant/    # AI Assistant / Agent Link panel
+  features/assistant/    # Tempo Agent / Agent Link panel
   features/agent/        # WebMCP tool registration, schemas, handlers, confirmation flow
   features/intro/        # First-run intro experience
   hooks/                 # Drag/resize/scroll/theme hooks

@@ -38,9 +38,15 @@ export interface CalendarSidebarProps {
   updateCalendar: (calendar: Calendar) => void;
   deleteCalendar: (calendarId: string) => void;
   importEvents: (events: CalendarEvent[], calendarId: string) => void;
-  /** Optional mini month calendar rendered at the top of the sidebar. */
+  /** Optional mini month calendar rendered below the calendar list. */
   miniCalendar?: React.ReactNode;
   className?: string;
+}
+
+interface Toast {
+  title: string;
+  description?: string;
+  variant: "default" | "error";
 }
 
 /**
@@ -61,7 +67,7 @@ export function CalendarSidebar({
   const [newName, setNewName] = React.useState("");
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<Toast | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   /** Calendar chosen as the target for the next import (default: first). */
   const [importTargetId, setImportTargetId] = React.useState<string | null>(null);
@@ -77,6 +83,13 @@ export function CalendarSidebar({
   const pendingDeleteCalendar = pendingDeleteId
     ? calendars.find((c) => c.id === pendingDeleteId)
     : undefined;
+
+  // Auto-dismiss the import toast after a few seconds.
+  React.useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const eventCountByCalendar = React.useMemo(() => {
     const map = new Map<string, number>();
@@ -110,11 +123,17 @@ export function CalendarSidebar({
       const text = await file.text();
       const parsed = parseICS(text);
       if (parsed.events.length === 0) {
-        setNotice("No events found in that file.");
+        setToast({
+          title: "Import failed",
+          description: "No events found in that file.",
+          variant: "error",
+        });
         return;
       }
       const targetId = importTargetId ?? calendars[0]?.id;
       if (!targetId) return;
+      const targetName =
+        calendars.find((c) => c.id === targetId)?.name ?? "calendar";
       const imported: CalendarEvent[] = parsed.events.map((e) => ({
         id: createEventId(),
         title: e.title,
@@ -130,9 +149,17 @@ export function CalendarSidebar({
       importEvents(imported, targetId);
       const warn =
         parsed.warnings.length > 0 ? ` (${parsed.warnings.length} skipped/warnings)` : "";
-      setNotice(`Imported ${imported.length} event${imported.length === 1 ? "" : "s"}${warn}.`);
+      setToast({
+        title: `Imported ${imported.length} event${imported.length === 1 ? "" : "s"}${warn}`,
+        description: `Added to ${targetName}`,
+        variant: "default",
+      });
     } catch {
-      setNotice("Could not read that file.");
+      setToast({
+        title: "Import failed",
+        description: "Could not read that file.",
+        variant: "error",
+      });
     }
   };
 
@@ -160,11 +187,6 @@ export function CalendarSidebar({
         className,
       )}
     >
-      {miniCalendar && (
-        <div className="mb-2 flex justify-center border-b pb-3">
-          {miniCalendar}
-        </div>
-      )}
       <div className="mb-1 flex items-center justify-between">
         <span className="label-mono text-muted-foreground">
           Calendars
@@ -179,6 +201,24 @@ export function CalendarSidebar({
           <CalendarPlus className="size-3.5" />
         </Button>
       </div>
+
+      {calendars.length === 0 && !creating && (
+        <div className="flex flex-col items-start gap-1 rounded-md border border-dashed px-3 py-4">
+          <span className="text-xs font-medium">No calendars yet</span>
+          <p className="text-muted-foreground text-[11px]">
+            Create a calendar to get started.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2 h-7 text-xs"
+            onClick={() => setCreating(true)}
+          >
+            <CalendarPlus className="size-3.5" />
+            Create calendar
+          </Button>
+        </div>
+      )}
 
       {calendars.map((calendar) => (
         <div key={calendar.id} className="group flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent">
@@ -309,6 +349,12 @@ export function CalendarSidebar({
         </div>
       )}
 
+      {miniCalendar && (
+        <div className="mt-3 flex justify-center border-t pt-3">
+          {miniCalendar}
+        </div>
+      )}
+
       <div className="mt-3 flex flex-col gap-1 border-t pt-2">
         <Button
           variant="ghost"
@@ -316,7 +362,11 @@ export function CalendarSidebar({
           className="justify-start text-xs"
           onClick={() => {
             if (calendars.length === 0) {
-              setNotice("Create a calendar before importing events.");
+              setToast({
+                title: "Nothing to import into",
+                description: "Create a calendar before importing events.",
+                variant: "error",
+              });
               return;
             }
             setImportPickerOpen(true);
@@ -332,10 +382,33 @@ export function CalendarSidebar({
         >
           <Download className="size-3.5" /> Export all (.ics)
         </Button>
-        {notice && (
-          <p className="text-muted-foreground px-2 text-[11px]">{notice}</p>
-        )}
       </div>
+
+      {/* Non-blocking import feedback toast (auto-dismisses). */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "bg-background fixed right-4 bottom-4 z-50 w-64 rounded-md border p-3 shadow-lg",
+            toast.variant === "error" && "border-destructive/50",
+          )}
+        >
+          <p
+            className={cn(
+              "text-xs font-medium",
+              toast.variant === "error" && "text-destructive",
+            )}
+          >
+            {toast.title}
+          </p>
+          {toast.description && (
+            <p className="text-muted-foreground mt-0.5 text-[11px]">
+              {toast.description}
+            </p>
+          )}
+        </div>
+      )}
 
       <input
         ref={fileInputRef}

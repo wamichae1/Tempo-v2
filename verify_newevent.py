@@ -19,7 +19,7 @@ def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: print("CONSOLE:", m.text) if m.text.startswith("[") else None)
         page.goto(BASE, wait_until="networkidle")
-        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1')")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1'); localStorage.setItem('tempo:calendars', JSON.stringify([{id:'cal-personal',name:'Personal',color:'purple',visible:true},{id:'cal-university',name:'University',color:'green',visible:true},{id:'cal-work',name:'Work',color:'blue',visible:true}])); localStorage.setItem('tempo:events','[]')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 

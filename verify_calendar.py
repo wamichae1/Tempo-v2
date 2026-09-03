@@ -32,30 +32,36 @@ def main():
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 
-        # 1. Week view renders with sidebar calendars
-        check("sidebar calendars", page.locator("text=Personal").count() >= 1)
+        # 1. Fresh install: no default calendars, empty state shown
+        check("empty state shown", page.locator("text=No calendars yet").count() >= 1)
+        check("no default calendars", page.locator("text=Personal").count() == 0)
+        page.get_by_role("button", name="Create calendar").click()
+        page.locator("input[placeholder='Calendar name']").fill("Personal")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+        check("calendar created from empty state", page.locator("aside").locator("text=Personal").count() >= 1)
         check("week grid", page.locator("text=Week").count() >= 1)
 
         # 2. Switch to Month view
-        page.get_by_role("button", name="Week").click()
-        page.get_by_role("menuitem", name="Month").click()
+        page.get_by_role("button", name="Week", exact=True).click()
+        page.get_by_role("menuitem", name="Month", exact=True).click()
         page.wait_for_timeout(500)
         check("month grid cells", page.locator("button", has_text="more").count() >= 0)
         # weekday header present
         check("month weekday header", page.locator("div", has_text="Sun").first.count() == 1)
         # navigate next/prev month
         title_before = page.locator("h1").inner_text()
-        page.get_by_role("button", name="Next").click()
+        page.get_by_role("button", name="Next", exact=True).click()
         page.wait_for_timeout(300)
         title_after = page.locator("h1").inner_text()
         check("month nav changes title", title_before != title_after, f"{title_before} -> {title_after}")
-        page.get_by_role("button", name="Today").click()
+        page.get_by_role("button", name="Today", exact=True).click()
         page.wait_for_timeout(300)
         check("today returns", page.locator("h1").inner_text() == title_before)
 
         # 3. Back to week
-        page.get_by_role("button", name="Month").click()
-        page.get_by_role("menuitem", name="Week").click()
+        page.get_by_role("button", name="Month", exact=True).click()
+        page.get_by_role("menuitem", name="Week", exact=True).click()
         page.wait_for_timeout(400)
 
         # 4. Create event

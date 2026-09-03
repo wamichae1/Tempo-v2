@@ -97,8 +97,8 @@ export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
             </h1>
             <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
               Plan your time, organize your calendars, and let the workspace
-              adapt to the way you work. Edit events directly, or hand tasks
-              to the built-in AI agent.
+              adapt to the way you work. Edit events directly, or connect an
+              external agent like ChatGPT to Tempo Agent via WebMCP.
             </p>
 
             <div className="mt-6 border-l pl-4">
@@ -106,8 +106,8 @@ export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
                 Getting started
               </p>
               <p className="text-muted-foreground mt-1.5 font-mono text-xs leading-relaxed">
-                Drag to create events. Press Ctrl+K for search. Ask the agent
-                to schedule for you.
+                Drag to create events. Press Ctrl+K for search. Let an agent
+                schedule for you through Tempo Agent.
               </p>
             </div>
 

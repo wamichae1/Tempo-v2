@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CalendarEvent } from "@/components/calendar";
-import { generateMockEvents } from "@/lib/mock-events";
 import { occurrenceEditToSeries } from "@/lib/recurrence";
 import type { Calendar } from "@/features/calendar/types";
 import { createDefaultCalendars, createCalendarId } from "@/features/calendar/types";
@@ -64,27 +63,20 @@ function loadInitialState(): { calendars: Calendar[]; events: CalendarEvent[] } 
   try {
     const rawCalendars = localStorage.getItem(LS_CALENDARS);
     const rawEvents = localStorage.getItem(LS_EVENTS);
-    if (rawCalendars && rawEvents) {
-      const calendars = JSON.parse(rawCalendars) as Calendar[];
-      const events = deserializeEvents(rawEvents);
-      if (Array.isArray(calendars) && calendars.length > 0) {
-        return { calendars, events };
-      }
+    // Restore whatever the user already has — never overwrite existing data.
+    const calendars = rawCalendars
+      ? (JSON.parse(rawCalendars) as Calendar[])
+      : [];
+    const events = rawEvents ? deserializeEvents(rawEvents) : [];
+    if (Array.isArray(calendars) && calendars.length > 0) {
+      return { calendars, events };
     }
   } catch {
-    // fall through to defaults
+    // fall through to the empty first-run state
   }
 
-  // First run: create default calendars and remap the mock events onto them.
-  const calendars = createDefaultCalendars();
-  const nameToId = new Map(calendars.map((c) => [c.name.toLowerCase(), c.id]));
-  const fallbackId = calendars[0].id;
-  const events = generateMockEvents().map((event) => ({
-    ...event,
-    calendarId:
-      nameToId.get((event.calendarId ?? "").toLowerCase()) ?? fallbackId,
-  }));
-  return { calendars, events };
+  // First run: start empty — no default calendars, no mock events.
+  return { calendars: createDefaultCalendars(), events: [] };
 }
 
 // ---------------------------------------------------------------------------

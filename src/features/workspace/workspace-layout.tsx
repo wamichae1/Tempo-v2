@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 export interface WorkspaceLayoutProps {
   /** Left region (calendars / navigation). */
   sidebar: React.ReactNode;
-  /** Right region (AI assistant). */
+  /** Right region (Tempo Agent panel). */
   assistant: React.ReactNode;
   /** Center workspace content. */
   children: React.ReactNode;
@@ -27,7 +27,7 @@ const separatorClass =
 
 /**
  * VS Code-style three-region workspace: collapsible/resizable sidebar and
- * assistant panel flanking the center content. Panel sizes persist to
+ * Tempo Agent panel flanking the center content. Panel sizes persist to
  * localStorage; collapse state is controlled by the parent so header buttons
  * and keyboard shortcuts stay in sync with sash drags.
  */

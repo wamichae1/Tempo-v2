@@ -68,11 +68,11 @@ export function createCalendarId(): string {
   return `cal-${Date.now().toString(36)}-${calendarIdCounter}`;
 }
 
-/** Default calendars created on first run. */
+/**
+ * Fresh installs start with no calendars — the user creates their own.
+ * Existing users' calendars are restored from localStorage and are never
+ * touched by this path.
+ */
 export function createDefaultCalendars(): Calendar[] {
-  return [
-    { id: "cal-personal", name: "Personal", color: "purple", visible: true },
-    { id: "cal-university", name: "University", color: "green", visible: true },
-    { id: "cal-work", name: "Work", color: "blue", visible: true },
-  ];
+  return [];
 }

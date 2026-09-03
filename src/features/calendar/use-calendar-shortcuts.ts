@@ -21,7 +21,7 @@ export interface CalendarShortcutsOptions {
   paste: () => void;
   /** Toggle the left sidebar (Ctrl/Cmd+B). */
   toggleSidebar: () => void;
-  /** Toggle the AI assistant panel (Ctrl/Cmd+J). */
+  /** Toggle the Tempo Agent panel (Ctrl/Cmd+J). */
   toggleAssistant: () => void;
 }
 

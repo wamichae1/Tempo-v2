@@ -148,8 +148,8 @@ export function CalendarHeader({
           size="icon"
           className="size-8"
           onClick={onToggleAssistant}
-          title="Agent Link / Assistant (Ctrl+J)"
-          aria-label="Agent Link"
+          title="Tempo Agent (Ctrl+J)"
+          aria-label="Tempo Agent"
         >
           <Bot className="size-4" />
         </Button>
