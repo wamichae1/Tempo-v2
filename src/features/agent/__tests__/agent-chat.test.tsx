@@ -42,13 +42,8 @@ function createSettings(
   overrides: Partial<AiSettingsState> = {},
 ): AiSettingsState {
   const keyStates = structuredClone(EMPTY_API_KEY_STATES);
-  keyStates.gemini = {
-    value: "gemini-key",
-    persisted: true,
-    revision: 2,
-    status: "verified",
-    error: "",
-  };
+  keyStates.gemini.value = "gemini-key";
+  keyStates.gemini.persisted = true;
   return {
     provider: "gemini",
     setProvider: vi.fn(),
@@ -61,17 +56,18 @@ function createSettings(
       gemini: "gemini-3.7-flash",
     },
     apiKey: "gemini-key",
+    setApiKey: vi.fn(),
     rememberApiKey: true,
+    setRememberApiKey: vi.fn(),
     keyStates,
     getKeyState: (provider) => keyStates[provider],
     saveApiKey: vi.fn(),
-    retryApiKeyValidation: vi.fn(),
     clearApiKey: vi.fn(),
     clearAllApiKeys: vi.fn(),
     configured: true,
     configuredKeys: ["gemini-key"],
     ...overrides,
-  };
+  } as AiSettingsState;
 }
 
 describe("AgentChat composer", () => {
