@@ -98,7 +98,7 @@ export function getAgentToolMetadata(): AgentToolInfo[] {
     },
   });
   const tools = buildAgentTools({
-    store: inertStore,
+    getStore: () => inertStore,
     confirm: () => Promise.resolve(false),
   });
   cache = tools.map((tool) => {

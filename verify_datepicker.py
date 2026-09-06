@@ -1,5 +1,7 @@
 """Verify date-picker popover + focus styling in the event detail panel."""
 
+import re
+
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:3000"
@@ -49,9 +51,13 @@ def main():
         cal.get_by_role("button", name="Previous month").click()
         page.wait_for_timeout(200)
 
-        # Pick a day 3 days after the current selection
+        # Pick a nearby day while keeping the event in the currently visible
+        # week; otherwise changing timed -> all-day can remount the event offscreen.
         day_num = int(selected.inner_text())
-        cal.locator("button", has_text=str(day_num + 3)).first.click()
+        target_day = day_num - 2 if day_num > 2 else day_num + 2
+        cal.locator("button.text-foreground").filter(
+            has_text=re.compile(rf"^{target_day}$")
+        ).first.click()
         page.wait_for_timeout(400)
         after = start_trigger.inner_text()
         print("start date after selection:", after)
@@ -85,9 +91,17 @@ def main():
         allday.first.click()
         page.wait_for_timeout(400)
         print("switches:", page.locator("[data-slot='switch']").count())
-        page.locator("[data-slot='switch']").first.click()
+        all_day_switch = page.get_by_role("switch").first
+        if all_day_switch.get_attribute("data-state") != "checked":
+            all_day_switch.click()
         page.wait_for_timeout(400)
         end_trigger = page.get_by_role("button", name="End date")
+        # Moving a timed event into the all-day row may remount/close its
+        # detail popover. Reopen the same event before checking the end picker.
+        if end_trigger.count() == 0:
+            page.get_by_text("Picker Test", exact=True).first.click()
+            page.wait_for_timeout(400)
+        end_trigger.wait_for(state="visible")
         assert end_trigger.count() == 1, "end date trigger missing for all-day"
         print("end date trigger label:", end_trigger.inner_text())
         end_trigger.click()
@@ -97,7 +111,9 @@ def main():
         sel = end_cal.locator("button[aria-pressed='true']")
         assert sel.count() == 1
         day = int(sel.inner_text())
-        end_cal.locator("button", has_text=str(day + 2)).first.click()
+        end_cal.get_by_role(
+            "button", name=str(day + 2), exact=True
+        ).first.click()
         page.wait_for_timeout(400)
         print("end date after selection:", end_trigger.inner_text())
         # Toggle all-day back off; timed event still intact

@@ -1,4 +1,5 @@
 import type { CalendarEvent, EventColor } from "@/components/calendar";
+import type { AgentTool } from "@/features/agent/agent-tool";
 import {
   createEventId,
   type CalendarEventsStore,
@@ -12,7 +13,6 @@ import {
   type RecurrenceRule,
 } from "@/lib/recurrence";
 import { TOOL_SCHEMAS, serializeCalendar, serializeEvent } from "./agent-tools";
-import type { WebMcpTool } from "./webmcp";
 
 /**
  * Execute implementations for Tempo's WebMCP tools.
@@ -32,9 +32,10 @@ export interface ConfirmRequest {
 }
 
 export interface AgentToolContext {
-  store: CalendarEventsStore;
+  /** Resolve the latest calendar store when a tool executes. */
+  getStore: () => CalendarEventsStore;
   /** Ask the user to confirm a destructive action. Resolves true/false. */
-  confirm: (request: ConfirmRequest) => Promise<boolean>;
+  confirm: (request: ConfirmRequest, signal?: AbortSignal) => Promise<boolean>;
 }
 
 type Input = Record<string, unknown>;
@@ -91,13 +92,14 @@ function findBaseEvent(
   return store.getEvent(baseId) ?? null;
 }
 
-export function buildAgentTools(ctx: AgentToolContext): WebMcpTool[] {
+export function buildAgentTools(ctx: AgentToolContext): AgentTool[] {
   const { confirm } = ctx;
   // Tools are built once but the store object is recreated every render.
   // Forward property access so execute callbacks always see the latest
   // calendars/events/canUndo, not the render captured at registration time.
   const store = new Proxy({} as CalendarEventsStore, {
-    get: (_target, prop) => ctx.store[prop as keyof CalendarEventsStore],
+    get: (_target, prop) =>
+      ctx.getStore()[prop as keyof CalendarEventsStore],
   });
 
   return [
@@ -349,16 +351,19 @@ export function buildAgentTools(ctx: AgentToolContext): WebMcpTool[] {
       description:
         "Delete an event. For recurring events the entire series is deleted. Requires user confirmation.",
       inputSchema: TOOL_SCHEMAS.tempo_delete_event,
-      execute: async (input: Input) => {
+      execute: async (input: Input, options) => {
         const base = findBaseEvent(store, input.eventId);
         if (!base) return err("event not found");
-        const approved = await confirm({
-          title: "Delete event",
-          body: base.rrule
-            ? `The agent wants to delete "${base.title}" and its entire recurring series.`
-            : `The agent wants to delete "${base.title}".`,
-          confirmLabel: "Delete",
-        });
+        const approved = await confirm(
+          {
+            title: "Delete event",
+            body: base.rrule
+              ? `The agent wants to delete "${base.title}" and its entire recurring series.`
+              : `The agent wants to delete "${base.title}".`,
+            confirmLabel: "Delete",
+          },
+          options.signal,
+        );
         if (!approved) return err("user declined the deletion");
         store.deleteEvent(base.id);
         return ok({ deleted: base.id });
@@ -418,7 +423,7 @@ export function buildAgentTools(ctx: AgentToolContext): WebMcpTool[] {
       description:
         "Delete a calendar and all of its events. Requires user confirmation.",
       inputSchema: TOOL_SCHEMAS.tempo_delete_calendar,
-      execute: async (input: Input) => {
+      execute: async (input: Input, options) => {
         const calendar = store.calendars.find((c) => c.id === input.calendarId);
         if (!calendar) return err("calendar not found");
         if (store.calendars.length <= 1) {
@@ -427,11 +432,14 @@ export function buildAgentTools(ctx: AgentToolContext): WebMcpTool[] {
         const count = store.events.filter(
           (e) => e.calendarId === calendar.id,
         ).length;
-        const approved = await confirm({
-          title: "Delete calendar",
-          body: `The agent wants to delete the calendar "${calendar.name}" and its ${count} event${count === 1 ? "" : "s"}.`,
-          confirmLabel: "Delete calendar",
-        });
+        const approved = await confirm(
+          {
+            title: "Delete calendar",
+            body: `The agent wants to delete the calendar "${calendar.name}" and its ${count} event${count === 1 ? "" : "s"}.`,
+            confirmLabel: "Delete calendar",
+          },
+          options.signal,
+        );
         if (!approved) return err("user declined the deletion");
         store.deleteCalendar(calendar.id);
         return ok({ deleted: calendar.id, deletedEvents: count });

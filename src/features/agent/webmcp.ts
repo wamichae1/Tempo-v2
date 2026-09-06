@@ -1,3 +1,5 @@
+import type { AgentTool } from "@/features/agent/agent-tool";
+
 /**
  * Thin typed wrapper around the WebMCP API (`document.modelContext`).
  *
@@ -8,30 +10,12 @@
  *   registration (there is no `unregisterTool` method).
  */
 
-export interface WebMcpToolAnnotations {
-  readOnlyHint?: boolean;
-  untrustedContentHint?: boolean;
-}
-
-export interface WebMcpToolExecuteOptions {
-  signal: AbortSignal;
-}
-
-export interface WebMcpTool {
-  name: string;
-  title?: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  execute: (
-    input: Record<string, unknown>,
-    options: WebMcpToolExecuteOptions,
-  ) => Promise<unknown>;
-  annotations?: WebMcpToolAnnotations;
-}
+/** @deprecated Import AgentTool from agent-tool.ts instead. */
+export type WebMcpTool = AgentTool;
 
 interface ModelContextLike {
   registerTool(
-    tool: WebMcpTool,
+    tool: AgentTool,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
   getTools(): Promise<Array<{ name: string; description?: string }>>;
@@ -56,7 +40,7 @@ export function isWebMcpSupported(): boolean {
  * never blocks the rest.
  */
 export async function registerTools(
-  tools: WebMcpTool[],
+  tools: readonly AgentTool[],
   signal: AbortSignal,
 ): Promise<string[]> {
   const mc = document.modelContext;

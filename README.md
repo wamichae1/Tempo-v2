@@ -23,10 +23,32 @@ Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-cla
 - **Undo/redo** across all mutations
 - **Conflict detection** for overlapping events
 - **LocalStorage persistence** — your data survives reloads, locally
-- **Tempo Agent panel** with an Agent Link interface for the WebMCP tools
+- **Tempo Agent panel** with built-in Chat and a WebMCP tool inspector
+- **Bring-your-own-key AI chat** with direct browser-to-OpenAI tool calling
 - **Responsive workspace** with resizable panels and dark/light themes
 
-## WebMCP / Agent Link
+## Tempo Agent
+
+The right-side Tempo Agent panel is the home for two related experiences:
+
+- **Chat** connects directly from the browser to OpenAI with the user's own API
+  key. It streams text and uses the same 14 Tempo tools as WebMCP.
+- **WebMCP** is the existing inspector for the tools exposed to compatible
+  external agents.
+
+### Configure Chat
+
+1. Open **Tempo Agent → Chat**.
+2. Open the settings dialog.
+3. Enter an OpenAI API key and model (the default is `gpt-5-mini`).
+4. Leave **Remember API key** off to keep the key in memory only, or explicitly
+   enable it to store the key unencrypted in this browser's `localStorage`.
+
+Tempo has no API proxy or backend. Requests go directly from the browser to
+OpenAI. A frontend key cannot be securely hidden from scripts running on the
+page or from someone with access to the browser profile.
+
+## WebMCP
 
 Tempo exposes its calendar functionality through [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`), so any WebMCP-aware AI agent can operate the calendar directly in the browser.
 
@@ -53,8 +75,8 @@ Tempo exposes its calendar functionality through [WebMCP](https://webmachinelear
 
 - Read operations are exposed as read-only WebMCP tools; mutations go through the same calendar store the UI uses, so agent-made changes keep normal persistence and undo/redo history.
 - Destructive actions (deleting events or calendars) can require an in-app user confirmation, with a timeout, before they execute.
-- WebMCP support is feature-detected at runtime — Tempo works fine in browsers without `document.modelContext`; the Agent Link panel simply reflects availability.
-- Tempo does not bundle its own AI model, and no agent is permanently connected. The in-app Agent Link panel is an interface for inspecting and managing the registered WebMCP tools.
+- WebMCP support is feature-detected at runtime — Tempo works fine in browsers without `document.modelContext`; the WebMCP view simply reflects availability.
+- Tempo Chat currently supports OpenAI through a provider-neutral runtime. WebMCP and built-in Chat execute the same tool objects and handlers.
 - Built with and adapted from [CalendarCN](https://github.com/vmnog/calendarcn), an open-source React calendar component. Tempo incorporates and modifies several of its calendar UI elements.
 
 ## Tech stack
@@ -80,6 +102,7 @@ npm run dev      # start the dev server
 npm run build    # type-check and build for production
 npm run preview  # preview the production build
 npm run lint     # run ESLint
+npm test         # run agent runtime/state/prompt tests
 ```
 
 ## Architecture
@@ -89,9 +112,8 @@ src/
   components/calendar/   # CalendarCN-derived calendar UI (month/week views, event items, detail panel)
   components/ui/         # shadcn-style primitives (button, popover, dropdown, switch, dialog)
   features/calendar/     # Calendar store, hooks, header, sidebar, search (the single source of truth)
-  features/workspace/    # Resizable workspace layout and tabs
-  features/assistant/    # Tempo Agent / Agent Link panel
-  features/agent/        # WebMCP tool registration, schemas, handlers, confirmation flow
+  features/workspace/    # Resizable three-region workspace layout
+  features/agent/        # Tempo Chat, WebMCP inspector/tools, handlers, and confirmations
   features/intro/        # First-run intro experience
   hooks/                 # Drag/resize/scroll/theme hooks
   lib/                   # ICS import/export, recurrence expansion, conflicts, search, event utils
@@ -105,6 +127,11 @@ Tempo is fully local-first:
 
 - **No backend, no account** — the app is a static client.
 - **Calendar data is persisted in `localStorage`** in your browser and never leaves the device by itself.
+- **AI requests are opt-in** and go directly to OpenAI when the user sends a
+  Chat message. Relevant conversation and tool results are included.
+- **API keys are memory-only by default.** Optional persistence is explicit and
+  stores the key unencrypted in browser `localStorage`.
+- Chat transcripts never persist API keys or provider continuation data.
 - **No external calendar integration** (Google, Outlook, etc.) currently exists; ICS import/export is the interchange mechanism.
 
 ## Current limitations

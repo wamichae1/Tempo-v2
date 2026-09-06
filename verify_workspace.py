@@ -26,12 +26,17 @@ def main():
         check("sidebar visible", page.locator("aside").first.is_visible())
         check("resize separators", page.locator("[data-separator]").count() == 2)
         check("assistant panel visible", page.locator("text=Tempo Agent").count() >= 1)
-        check("agent webmcp section", page.locator("text=tempo_create_event").count() >= 1
-              or page.locator("text=compatible agent/browser environment").count() >= 1)
+        check("agent chat section", page.locator("text=Chat with Tempo").is_visible())
 
-        # 2. No workspace tab strip (removed: panels are independently collapsible)
-        check("tab strip removed", page.locator("[role='tablist']").count() == 0)
-        check("header agent control", page.get_by_role("button", name="Tempo Agent").count() == 1)
+        # 2. The only tab strip is local to Tempo Agent.
+        check("agent tab strip", page.locator("[role='tablist']").count() == 1)
+        check("chat tab selected",
+              page.get_by_role("tab", name="Chat")
+              .get_attribute("aria-selected") == "true")
+        check("webmcp tab present", page.get_by_role("tab", name="WebMCP").count() == 1)
+        check("header agent control",
+              page.get_by_role("button", name="Tempo Agent", exact=True).count() == 1)
+        check("chat composer", page.get_by_role("textbox", name="Message Tempo Agent").is_visible())
 
         # 3. Ctrl+B collapses the sidebar, again restores it
         page.keyboard.press("Control+b")
@@ -42,7 +47,7 @@ def main():
         check("ctrl+b restores sidebar", page.locator("aside").first.is_visible())
 
         # 4. Ctrl+J toggles the assistant panel
-        panel_marker = page.locator("text=compatible agent/browser environment")
+        panel_marker = page.get_by_role("textbox", name="Message Tempo Agent")
         page.keyboard.press("Control+j")
         page.wait_for_timeout(400)
         check("ctrl+j hides assistant", not panel_marker.first.is_visible())
@@ -73,10 +78,18 @@ def main():
         page.wait_for_timeout(300)
         check("back to light", not page.evaluate("document.documentElement.classList.contains('dark')"))
 
-        # 7. No chat UI: panel is a WebMCP tool inspector
-        check("no chat composer", page.locator("textarea").count() == 0
-              and page.get_by_role("button", name="Send").count() == 0)
-        check("unavailable empty state", panel_marker.first.is_visible())
+        # 7. WebMCP unsupported state remains available independently.
+        page.get_by_role("tab", name="WebMCP").click()
+        check("unavailable empty state",
+              page.locator("text=compatible agent/browser environment").is_visible())
+        page.get_by_role("tab", name="Chat").click()
+
+        # 8. The right panel remains usable at a narrow workspace width.
+        page.set_viewport_size({"width": 720, "height": 720})
+        page.wait_for_timeout(300)
+        check("narrow composer visible", panel_marker.is_visible())
+        check("narrow no horizontal overflow",
+              page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"))
 
         check("no page errors", not errors, "; ".join(errors[:3]))
         browser.close()

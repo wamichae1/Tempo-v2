@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { AgentTool } from "@/features/agent/agent-tool";
 import type { CalendarEventsStore } from "@/features/calendar/use-calendar-events";
 import {
   buildAgentTools,
@@ -30,6 +31,8 @@ export interface AgentToolsState {
   setConfirmationsEnabled: (enabled: boolean) => void;
   /** A confirmation request currently waiting on the user, if any. */
   pendingConfirmation: PendingConfirmation | null;
+  /** Shared tools used by both WebMCP and built-in Tempo Chat. */
+  tools: readonly AgentTool[];
 }
 
 /**
@@ -62,33 +65,51 @@ export function useAgentTools(store: CalendarEventsStore): AgentToolsState {
     confirmationsRef.current = confirmationsEnabled;
   }, [confirmationsEnabled]);
 
-  const confirm = useCallback((request: ConfirmRequest): Promise<boolean> => {
-    if (!confirmationsRef.current) return Promise.resolve(true);
-    return new Promise<boolean>((resolve) => {
-      const timeout = window.setTimeout(() => {
-        pendingResolveRef.current = null;
-        setPending(null);
-        resolve(false);
-      }, CONFIRM_TIMEOUT_MS);
-      pendingResolveRef.current = (approved) => {
-        window.clearTimeout(timeout);
-        pendingResolveRef.current = null;
-        setPending(null);
-        resolve(approved);
-      };
-      setPending({ request, resolve: pendingResolveRef.current });
-    });
-  }, []);
+  const confirm = useCallback(
+    (request: ConfirmRequest, signal?: AbortSignal): Promise<boolean> => {
+      if (!confirmationsRef.current) return Promise.resolve(true);
+      if (signal?.aborted) return Promise.resolve(false);
+      // Tempo supports one confirmation at a time. A newer request safely
+      // declines any older pending request.
+      pendingResolveRef.current?.(false);
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (approved: boolean) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          signal?.removeEventListener("abort", handleAbort);
+          if (pendingResolveRef.current === finish) {
+            pendingResolveRef.current = null;
+            setPending(null);
+          }
+          resolve(approved);
+        };
+        const handleAbort = () => finish(false);
+        const timeout = window.setTimeout(
+          () => finish(false),
+          CONFIRM_TIMEOUT_MS,
+        );
+        signal?.addEventListener("abort", handleAbort, { once: true });
+        pendingResolveRef.current = finish;
+        setPending({ request, resolve: finish });
+      });
+    },
+    [],
+  );
+
+  const getStore = useCallback(() => storeRef.current, []);
+  // The returned tool callbacks retain getStore without invoking it during
+  // render; the ref is only read later when a tool executes.
+  const tools = useMemo(
+    // eslint-disable-next-line react-hooks/refs
+    () => buildAgentTools({ getStore, confirm }),
+    [confirm, getStore],
+  );
 
   useEffect(() => {
     if (!supported) return;
     const controller = new AbortController();
-    const tools = buildAgentTools({
-      get store() {
-        return storeRef.current;
-      },
-      confirm,
-    });
     registerTools(tools, controller.signal)
       .then((names) => {
         if (!controller.signal.aborted) setToolNames(names);
@@ -99,8 +120,7 @@ export function useAgentTools(store: CalendarEventsStore): AgentToolsState {
       // Auto-decline any pending confirmation on unmount.
       pendingResolveRef.current?.(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supported]);
+  }, [supported, tools]);
 
   const setConfirmationsEnabled = useCallback((enabled: boolean) => {
     setConfirmationsEnabledState(enabled);
@@ -125,6 +145,7 @@ export function useAgentTools(store: CalendarEventsStore): AgentToolsState {
     confirmationsEnabled,
     setConfirmationsEnabled,
     pendingConfirmation,
+    tools,
   };
 }
 
