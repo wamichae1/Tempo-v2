@@ -24,15 +24,16 @@ Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-cla
 - **Conflict detection** for overlapping events
 - **LocalStorage persistence** — your data survives reloads, locally
 - **Tempo Agent panel** with built-in Chat and a WebMCP tool inspector
-- **Bring-your-own-key AI chat** with direct browser-to-OpenAI tool calling
+- **Bring-your-own-key AI chat** with direct browser-to-provider tool calling
 - **Responsive workspace** with resizable panels and dark/light themes
 
 ## Tempo Agent
 
 The right-side Tempo Agent panel is the home for two related experiences:
 
-- **Chat** connects directly from the browser to OpenAI with the user's own API
-  key. It streams text and uses the same 14 Tempo tools as WebMCP.
+- **Chat** connects directly from the browser to the selected AI provider with
+  the user's own API key. It streams text and uses the same 14 Tempo tools as
+  WebMCP.
 - **WebMCP** is the existing inspector for the tools exposed to compatible
   external agents.
 
@@ -40,13 +41,19 @@ The right-side Tempo Agent panel is the home for two related experiences:
 
 1. Open **Tempo Agent → Chat**.
 2. Open the settings dialog.
-3. Enter an OpenAI API key and model (the default is `gpt-5-mini`).
-4. Leave **Remember API key** off to keep the key in memory only, or explicitly
-   enable it to store the key unencrypted in this browser's `localStorage`.
+3. Choose OpenAI, OpenRouter, OpenCode, or Google Gemini.
+4. Add a separate API key for that provider. Leave **Remember API key** off to
+   keep it in memory only, or explicitly enable it to store the key unencrypted
+   in this browser's `localStorage`.
+5. Choose a model from the searchable catalog fetched directly from the
+   selected provider.
 
 Tempo has no API proxy or backend. Requests go directly from the browser to
-OpenAI. A frontend key cannot be securely hidden from scripts running on the
-page or from someone with access to the browser profile.
+the selected provider. A frontend key cannot be securely hidden from scripts,
+browser extensions, developer tools, or someone with access to the browser or
+device. NVIDIA NIM remains visible in settings but is currently unavailable in
+the static browser-direct deployment because its hosted API does not permit the
+required browser access.
 
 ## WebMCP
 
@@ -76,7 +83,9 @@ Tempo exposes its calendar functionality through [WebMCP](https://webmachinelear
 - Read operations are exposed as read-only WebMCP tools; mutations go through the same calendar store the UI uses, so agent-made changes keep normal persistence and undo/redo history.
 - Destructive actions (deleting events or calendars) can require an in-app user confirmation, with a timeout, before they execute.
 - WebMCP support is feature-detected at runtime — Tempo works fine in browsers without `document.modelContext`; the WebMCP view simply reflects availability.
-- Tempo Chat currently supports OpenAI through a provider-neutral runtime. WebMCP and built-in Chat execute the same tool objects and handlers.
+- Tempo Chat uses a provider-neutral runtime with OpenAI, OpenRouter, OpenCode
+  Zen, and Google Gemini implementations. WebMCP and built-in Chat execute the
+  same tool objects and handlers.
 - Built with and adapted from [CalendarCN](https://github.com/vmnog/calendarcn), an open-source React calendar component. Tempo incorporates and modifies several of its calendar UI elements.
 
 ## Tech stack
@@ -127,10 +136,14 @@ Tempo is fully local-first:
 
 - **No backend, no account** — the app is a static client.
 - **Calendar data is persisted in `localStorage`** in your browser and never leaves the device by itself.
-- **AI requests are opt-in** and go directly to OpenAI when the user sends a
-  Chat message. Relevant conversation and tool results are included.
-- **API keys are memory-only by default.** Optional persistence is explicit and
-  stores the key unencrypted in browser `localStorage`.
+- **AI requests are opt-in** and go directly to the selected provider when the
+  user sends a Chat message. Relevant conversation and tool results are
+  included; no Tempo backend receives them or the key.
+- **Each provider has a separate API key. API keys are memory-only by default.**
+  Optional per-provider persistence is explicit and stores the key unencrypted
+  in browser `localStorage`, separately from ordinary settings.
+- **Model lists are fetched from the selected provider.** Catalog metadata is
+  cached only in memory and never contains or stores API keys.
 - Chat transcripts never persist API keys or provider continuation data.
 - **No external calendar integration** (Google, Outlook, etc.) currently exists; ICS import/export is the interchange mechanism.
 

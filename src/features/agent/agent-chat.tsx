@@ -183,7 +183,7 @@ export function AgentChat({
                 className="mt-3"
                 onClick={() => setSettingsOpen(true)}
               >
-                Configure OpenAI
+                Configure AI
               </Button>
             )}
           </div>
@@ -289,6 +289,7 @@ export function AgentChat({
         settings={settings}
         confirmationsEnabled={confirmationsEnabled}
         onConfirmationsEnabledChange={onConfirmationsEnabledChange}
+        runtimeBusy={chat.isRunning}
       />
 
       <TempoDialog

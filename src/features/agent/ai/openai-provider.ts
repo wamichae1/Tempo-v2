@@ -2,13 +2,18 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 
 import type {
+  AIModel,
   AiConversationMessage,
+  AiModelDiscoveryRequest,
   AiProvider,
   AiProviderEvent,
   AiProviderRequest,
   AiProviderTurnResult,
 } from "@/features/agent/ai/ai-provider";
 import { AiProviderError } from "@/features/agent/ai/ai-provider";
+
+const NON_CHAT_MODEL =
+  /(?:embedding|moderation|whisper|tts|transcribe|image|dall-e|realtime|audio)/i;
 
 function mapConversation(
   conversation: AiConversationMessage[],
@@ -96,6 +101,40 @@ function classifyError(error: unknown): AiProviderError {
 
 export class OpenAiProvider implements AiProvider {
   readonly id = "openai" as const;
+  readonly metadata = {
+    id: this.id,
+    displayName: "OpenAI",
+    apiKeyStorageKey: "tempo:ai-key:openai:v1",
+    apiKeyPlaceholder: "sk-...",
+    defaultModelId: "gpt-5-mini",
+    availability: "enabled",
+  } as const;
+
+  normalizeApiKey(value: string): string {
+    return value.trim();
+  }
+
+  async discoverModels(request: AiModelDiscoveryRequest): Promise<AIModel[]> {
+    try {
+      const client = new OpenAI({
+        apiKey: this.normalizeApiKey(request.apiKey),
+        dangerouslyAllowBrowser: true,
+      });
+      const page = await client.models.list({ signal: request.signal });
+      return page.data
+        .filter((model) => !NON_CHAT_MODEL.test(model.id))
+        .map((model) => ({
+          id: model.id,
+          providerId: this.id,
+          displayName: model.id,
+          owner: model.owned_by,
+          toolSupport: "unknown" as const,
+        }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    } catch (error) {
+      throw classifyError(error);
+    }
+  }
 
   async *stream(request: AiProviderRequest): AsyncIterable<AiProviderEvent> {
     try {

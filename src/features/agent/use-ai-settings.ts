@@ -1,132 +1,224 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { AiProviderId } from "@/features/agent/ai/ai-provider";
+import type { RunnableAiProviderId } from "@/features/agent/ai/ai-provider";
+import {
+  AI_SETTINGS_V1_STORAGE_KEY,
+  AI_SETTINGS_V2_STORAGE_KEY,
+  loadAiSettings,
+  serializeAiSettings,
+  type ProviderModels,
+} from "@/features/agent/ai/ai-settings-storage";
+import {
+  clearAllPersistedApiKeys,
+  EMPTY_API_KEY_STATES,
+  getApiKeyStorageKey,
+  loadPersistedApiKeys,
+  persistApiKey,
+  type ApiKeyState,
+  type ApiKeyStates,
+} from "@/features/agent/ai/api-key-store";
+import { invalidateModelCache } from "@/features/agent/ai/model-catalog";
+import { getAiProviderDefinition } from "@/features/agent/ai/provider-registry";
 
-const SETTINGS_STORAGE_KEY = "tempo:ai-settings:v1";
-const OPENAI_KEY_STORAGE_KEY = "tempo:ai-key:openai:v1";
-const DEFAULT_MODEL = "gpt-5-mini";
-
-interface StoredAiSettings {
-  version: 1;
-  provider: AiProviderId;
-  model: string;
-  rememberApiKey: boolean;
+interface InitialAiState {
+  provider: RunnableAiProviderId;
+  models: ProviderModels;
+  keys: ApiKeyStates;
 }
 
-function readStoredSettings(): StoredAiSettings {
+const unavailableStorage: Storage = {
+  length: 0,
+  clear: () => {},
+  getItem: () => null,
+  key: () => null,
+  removeItem: () => {},
+  setItem: () => {},
+};
+
+function readInitialState(): InitialAiState {
   try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<StoredAiSettings>;
-      if (
-        parsed.version === 1 &&
-        parsed.provider === "openai" &&
-        typeof parsed.model === "string" &&
-        parsed.model.trim()
-      ) {
-        return {
-          version: 1,
-          provider: "openai",
-          model: parsed.model,
-          rememberApiKey: parsed.rememberApiKey === true,
-        };
-      }
+    const loaded = loadAiSettings(localStorage);
+    const keys = loadPersistedApiKeys(localStorage);
+    if (loaded.migratedFromV1 && !loaded.legacyRememberOpenAi) {
+      localStorage.removeItem(getApiKeyStorageKey("openai"));
+      keys.openai = { ...EMPTY_API_KEY_STATES.openai };
     }
+    return {
+      provider: loaded.settings.provider,
+      models: loaded.settings.models,
+      keys,
+    };
   } catch {
-    // Fall through to defaults.
-  }
-  return {
-    version: 1,
-    provider: "openai",
-    model: DEFAULT_MODEL,
-    rememberApiKey: false,
-  };
-}
-
-function readStoredKey(remember: boolean): string {
-  if (!remember) return "";
-  try {
-    return localStorage.getItem(OPENAI_KEY_STORAGE_KEY) ?? "";
-  } catch {
-    return "";
+    const loaded = loadAiSettings(unavailableStorage);
+    return {
+      provider: loaded.settings.provider,
+      models: loaded.settings.models,
+      keys: structuredClone(EMPTY_API_KEY_STATES),
+    };
   }
 }
 
 export interface AiSettingsState {
-  provider: AiProviderId;
-  setProvider: (provider: AiProviderId) => void;
+  provider: RunnableAiProviderId;
+  setProvider: (provider: RunnableAiProviderId) => void;
   model: string;
   setModel: (model: string) => void;
+  models: ProviderModels;
   apiKey: string;
   setApiKey: (apiKey: string) => void;
   rememberApiKey: boolean;
   setRememberApiKey: (remember: boolean) => void;
-  clearApiKey: () => void;
+  keyStates: ApiKeyStates;
+  getKeyState: (provider: RunnableAiProviderId) => ApiKeyState;
+  saveApiKey: (
+    provider: RunnableAiProviderId,
+    apiKey: string,
+    remember: boolean,
+  ) => void;
+  clearApiKey: (provider?: RunnableAiProviderId) => void;
+  clearAllApiKeys: () => void;
   configured: boolean;
+  configuredKeys: string[];
 }
 
 export function useAiSettings(): AiSettingsState {
-  const [initial] = useState(readStoredSettings);
-  const [provider, setProvider] = useState<AiProviderId>(initial.provider);
-  const [model, setModel] = useState(initial.model);
-  const [rememberApiKey, setRememberState] = useState(initial.rememberApiKey);
-  const [apiKey, setApiKeyState] = useState(() =>
-    readStoredKey(initial.rememberApiKey),
+  const [initial] = useState(readInitialState);
+  const [provider, setProvider] = useState(initial.provider);
+  const [models, setModels] = useState(initial.models);
+  const [keyStates, setKeyStates] = useState(initial.keys);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        AI_SETTINGS_V2_STORAGE_KEY,
+        serializeAiSettings({ version: 2, provider, models }),
+      );
+      localStorage.removeItem(AI_SETTINGS_V1_STORAGE_KEY);
+    } catch {
+      // Keep non-secret settings in memory when storage is unavailable.
+    }
+  }, [models, provider]);
+
+  const setModel = useCallback(
+    (model: string) => {
+      setModels((current) => ({ ...current, [provider]: model }));
+    },
+    [provider],
   );
 
-  useEffect(() => {
-    try {
-      const stored: StoredAiSettings = {
-        version: 1,
-        provider,
-        model: model.trim() || DEFAULT_MODEL,
-        rememberApiKey,
-      };
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
-    } catch {
-      // Keep preferences in memory when storage is unavailable.
-    }
-  }, [provider, model, rememberApiKey]);
-
-  useEffect(() => {
-    try {
-      if (rememberApiKey && apiKey.trim()) {
-        localStorage.setItem(OPENAI_KEY_STORAGE_KEY, apiKey.trim());
-      } else {
-        localStorage.removeItem(OPENAI_KEY_STORAGE_KEY);
+  const saveApiKey = useCallback(
+    (
+      targetProvider: RunnableAiProviderId,
+      apiKey: string,
+      remember: boolean,
+    ) => {
+      const definition = getAiProviderDefinition(targetProvider);
+      const normalized =
+        definition.create?.().normalizeApiKey(apiKey) ?? apiKey.trim();
+      try {
+        persistApiKey(localStorage, targetProvider, normalized, remember);
+      } catch {
+        remember = false;
       }
-    } catch {
-      // Keep the key in memory when storage is unavailable.
-    }
-  }, [apiKey, rememberApiKey]);
+      invalidateModelCache(targetProvider);
+      setKeyStates((current) => ({
+        ...current,
+        [targetProvider]: {
+          value: normalized,
+          persisted: remember && normalized.length > 0,
+          revision: current[targetProvider].revision + 1,
+        },
+      }));
+    },
+    [],
+  );
 
-  const setApiKey = useCallback((value: string) => {
-    setApiKeyState(value);
-  }, []);
+  const setApiKey = useCallback(
+    (apiKey: string) => {
+      saveApiKey(provider, apiKey, false);
+    },
+    [provider, saveApiKey],
+  );
 
-  const setRememberApiKey = useCallback((remember: boolean) => {
-    setRememberState(remember);
-  }, []);
+  const setRememberApiKey = useCallback(
+    (remember: boolean) => {
+      saveApiKey(provider, keyStates[provider].value, remember);
+    },
+    [keyStates, provider, saveApiKey],
+  );
 
-  const clearApiKey = useCallback(() => {
-    setApiKeyState("");
+  const clearApiKey = useCallback(
+    (targetProvider: RunnableAiProviderId = provider) => {
+      try {
+        persistApiKey(localStorage, targetProvider, "", false);
+      } catch {
+        // The in-memory key is still cleared.
+      }
+      invalidateModelCache(targetProvider);
+      setKeyStates((current) => ({
+        ...current,
+        [targetProvider]: {
+          value: "",
+          persisted: false,
+          revision: current[targetProvider].revision + 1,
+        },
+      }));
+    },
+    [provider],
+  );
+
+  const clearAllApiKeys = useCallback(() => {
     try {
-      localStorage.removeItem(OPENAI_KEY_STORAGE_KEY);
+      clearAllPersistedApiKeys(localStorage);
     } catch {
-      // Nothing else to clear.
+      // The in-memory keys are still cleared.
     }
+    invalidateModelCache();
+    setKeyStates((current) =>
+      Object.fromEntries(
+        (Object.keys(current) as RunnableAiProviderId[]).map((id) => [
+          id,
+          {
+            value: "",
+            persisted: false,
+            revision: current[id].revision + 1,
+          },
+        ]),
+      ) as ApiKeyStates,
+    );
   }, []);
+
+  const getKeyState = useCallback(
+    (targetProvider: RunnableAiProviderId) => keyStates[targetProvider],
+    [keyStates],
+  );
+
+  const configuredKeys = useMemo(
+    () =>
+      Object.values(keyStates)
+        .map((state) => state.value.trim())
+        .filter(Boolean),
+    [keyStates],
+  );
+  const currentKey = keyStates[provider];
+  const model = models[provider];
 
   return {
     provider,
     setProvider,
     model,
     setModel,
-    apiKey,
+    models,
+    apiKey: currentKey.value,
     setApiKey,
-    rememberApiKey,
+    rememberApiKey: currentKey.persisted,
     setRememberApiKey,
+    keyStates,
+    getKeyState,
+    saveApiKey,
     clearApiKey,
-    configured: apiKey.trim().length > 0 && model.trim().length > 0,
+    clearAllApiKeys,
+    configured: currentKey.value.trim().length > 0 && model.trim().length > 0,
+    configuredKeys,
   };
 }

@@ -76,7 +76,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function safeJsonValue(value: unknown, depth = 0): unknown {
+export function redactConfiguredSecrets(
+  value: string,
+  secrets: readonly string[],
+): string {
+  let redacted = value;
+  for (const secret of secrets) {
+    const normalized = secret.trim();
+    if (normalized) redacted = redacted.split(normalized).join("[redacted-api-key]");
+  }
+  return redacted;
+}
+
+function safeJsonValue(
+  value: unknown,
+  secrets: readonly string[],
+  depth = 0,
+): unknown {
   if (depth > 8) return "[truncated]";
   if (
     value === null ||
@@ -86,22 +102,35 @@ function safeJsonValue(value: unknown, depth = 0): unknown {
     return value;
   }
   if (typeof value === "string") {
-    return value.length > 10_000
-      ? `${value.slice(0, 10_000)}[truncated]`
-      : value;
+    const redacted = redactConfiguredSecrets(value, secrets);
+    return redacted.length > 10_000
+      ? `${redacted.slice(0, 10_000)}[truncated]`
+      : redacted;
   }
   if (Array.isArray(value)) {
-    return value.slice(0, 100).map((item) => safeJsonValue(item, depth + 1));
+    return value
+      .slice(0, 100)
+      .map((item) => safeJsonValue(item, secrets, depth + 1));
   }
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.entries(value)
         .filter(([key]) => !/api[-_]?key|authorization|continuation/i.test(key))
         .slice(0, 100)
-        .map(([key, item]) => [key, safeJsonValue(item, depth + 1)]),
+        .map(([key, item]) => [
+          key,
+          safeJsonValue(item, secrets, depth + 1),
+        ]),
     );
   }
-  return String(value);
+  return redactConfiguredSecrets(String(value), secrets);
+}
+
+export function sanitizeChatValue(
+  value: unknown,
+  secrets: readonly string[],
+): unknown {
+  return safeJsonValue(value, secrets);
 }
 
 function isMessage(value: unknown): value is AgentChatMessage {
@@ -192,15 +221,42 @@ export function migrateLegacyChat(raw: string | null): AgentChatEntry[] {
   }
 }
 
-export function serializeStoredChat(entries: AgentChatEntry[]): string {
+export function containsConfiguredSecret(
+  value: string,
+  secrets: readonly string[],
+): boolean {
+  return secrets.some((secret) => {
+    const normalized = secret.trim();
+    return normalized.length > 0 && value.includes(normalized);
+  });
+}
+
+export function serializeStoredChat(
+  entries: AgentChatEntry[],
+  secrets: readonly string[] = [],
+): string {
   const sanitized = entries
     .slice(-MAX_PERSISTED_ENTRIES)
     .map((entry): AgentChatEntry => {
-      if (entry.kind !== "tool") return entry;
+      if (entry.kind === "message") {
+        return {
+          ...entry,
+          text: redactConfiguredSecrets(entry.text, secrets),
+        };
+      }
+      if (entry.kind === "error") {
+        return {
+          ...entry,
+          message: redactConfiguredSecrets(entry.message, secrets),
+        };
+      }
       return {
         ...entry,
-        arguments: safeJsonValue(entry.arguments) as Record<string, unknown>,
-        result: safeJsonValue(entry.result),
+        arguments: safeJsonValue(
+          entry.arguments,
+          secrets,
+        ) as Record<string, unknown>,
+        result: safeJsonValue(entry.result, secrets),
       };
     });
   const stored: StoredChatV2 = { version: 2, entries: sanitized };

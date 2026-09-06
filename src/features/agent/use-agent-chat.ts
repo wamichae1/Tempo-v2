@@ -5,8 +5,11 @@ import {
   CHAT_STORAGE_KEY,
   LEGACY_CHAT_STORAGE_KEY,
   MAX_PERSISTED_ENTRIES,
+  containsConfiguredSecret,
   createAgentEntryId,
   loadChatEntries,
+  redactConfiguredSecrets,
+  sanitizeChatValue,
   serializeStoredChat,
   type AgentChatEntry,
   type AgentChatMessage,
@@ -94,15 +97,13 @@ export function useAgentChat({
         localStorage.removeItem(CHAT_STORAGE_KEY);
         return;
       }
-      let serialized = serializeStoredChat(entries);
-      const key = settings.apiKey.trim();
-      if (key) serialized = serialized.split(key).join("[redacted-api-key]");
+      const serialized = serializeStoredChat(entries, settings.configuredKeys);
       localStorage.setItem(CHAT_STORAGE_KEY, serialized);
       localStorage.removeItem(LEGACY_CHAT_STORAGE_KEY);
     } catch {
       // Storage unavailable or full - keep the conversation in memory.
     }
-  }, [entries, settings.apiKey]);
+  }, [entries, settings.configuredKeys]);
 
   useEffect(
     () => () => {
@@ -114,6 +115,23 @@ export function useAgentChat({
   const submitDraft = useCallback((): boolean => {
     const text = draft.trim();
     if (!text || activeRunRef.current || !settings.configured) return false;
+    if (containsConfiguredSecret(text, settings.configuredKeys)) {
+      setEntries((current) =>
+        capEntries([
+          ...current,
+          {
+            kind: "error",
+            id: createAgentEntryId("error"),
+            code: "missing-key",
+            message:
+              "Remove API keys from the message before sending. Tempo never places configured keys in the transcript.",
+            retryable: false,
+            createdAt: new Date().toISOString(),
+          },
+        ]),
+      );
+      return false;
+    }
 
     const userMessage: AgentChatMessage = {
       kind: "message",
@@ -163,10 +181,14 @@ export function useAgentChat({
           const id = assistantByRound.get(round);
           if (!id) return;
           setRuntimeStatus("streaming");
+          const safeDelta = redactConfiguredSecrets(
+            delta,
+            settings.configuredKeys,
+          );
           setEntries((current) =>
             current.map((entry) =>
               entry.kind === "message" && entry.id === id
-                ? { ...entry, text: entry.text + delta }
+                ? { ...entry, text: entry.text + safeDelta }
                 : entry,
             ),
           );
@@ -182,7 +204,11 @@ export function useAgentChat({
               entry.kind === "message" && entry.id === id
                 ? {
                     ...entry,
-                    text: finalText.trim() || "No response.",
+                    text:
+                      redactConfiguredSecrets(
+                        finalText,
+                        settings.configuredKeys,
+                      ).trim() || "No response.",
                     status: "complete",
                   }
                 : entry,
@@ -198,7 +224,10 @@ export function useAgentChat({
             callId: call.callId,
             toolName: call.name,
             status: "running",
-            arguments: argumentsValue,
+            arguments: sanitizeChatValue(
+              argumentsValue,
+              settings.configuredKeys,
+            ) as Record<string, unknown>,
             createdAt: new Date().toISOString(),
           };
           setRuntimeStatus("executing-tool");
@@ -213,7 +242,10 @@ export function useAgentChat({
                 ? {
                     ...entry,
                     status: succeeded ? "succeeded" : "failed",
-                    result,
+                    result: sanitizeChatValue(
+                      result,
+                      settings.configuredKeys,
+                    ),
                   }
                 : entry,
             ),
@@ -253,7 +285,10 @@ export function useAgentChat({
               kind: "error",
               id: createAgentEntryId("error"),
               code: detail.code,
-              message: detail.message,
+                message: redactConfiguredSecrets(
+                  detail.message,
+                  settings.configuredKeys,
+                ),
               retryable: detail.retryable,
               createdAt: new Date().toISOString(),
             },

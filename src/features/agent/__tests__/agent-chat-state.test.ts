@@ -64,4 +64,31 @@ describe("agent chat persistence", () => {
     expect(serialized).not.toContain("continuation");
     expect(serialized).toContain("study");
   });
+
+  it("redacts configured keys from every persisted transcript entry", () => {
+    const secret = "provider-secret-key";
+    const serialized = serializeStoredChat(
+      [
+        {
+          kind: "message",
+          id: "user",
+          role: "user",
+          text: `do not store ${secret}`,
+          status: "complete",
+          createdAt: "2026-09-06T12:00:00.000Z",
+        },
+        {
+          kind: "error",
+          id: "error",
+          code: "provider",
+          message: `provider echoed ${secret}`,
+          retryable: false,
+          createdAt: "2026-09-06T12:00:00.000Z",
+        },
+      ],
+      [secret],
+    );
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain("[redacted-api-key]");
+  });
 });

@@ -52,6 +52,39 @@ MOCK_OPENAI = """
   globalThis.__tempoOpenAiRequests = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = typeof input === "string" ? input : input.url;
+    if (url.includes("openrouter.ai/api/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [
+          {
+            id: "openrouter/auto",
+            name: "OpenRouter Auto",
+            supported_parameters: ["tools"],
+            architecture: { output_modalities: ["text"] },
+          },
+          {
+            id: "openai/gpt-5-mini",
+            name: "OpenAI: GPT-5 mini",
+            supported_parameters: ["tools"],
+            architecture: { output_modalities: ["text"] },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.includes("api.openai.com/v1/models")) {
+      return new Response(JSON.stringify({
+        object: "list",
+        data: [
+          { id: "gpt-5-mini", object: "model", created: 1788624000, owned_by: "openai" },
+          { id: "gpt-5", object: "model", created: 1788624000, owned_by: "openai" },
+        ],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (!url.includes("api.openai.com/v1/responses")) {
       return originalFetch(input, init);
     }
@@ -240,7 +273,11 @@ def main():
               page.get_by_role("alertdialog", name="Tempo Agent settings").is_visible())
         check("missing key preserves draft",
               composer.input_value() == "Schedule a study session tomorrow at 2 PM")
-        page.get_by_role("textbox", name="OpenAI API key").fill("sk-invalid")
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        openai_row = page.locator("[data-provider-id='openai']")
+        openai_row.get_by_role("button", name="Add key").click()
+        openai_row.get_by_role("textbox", name="OpenAI API key").fill("sk-invalid")
+        openai_row.get_by_role("button", name="Save key").click()
         page.get_by_role("button", name="Done").click()
         composer.press("Enter")
         page.wait_for_selector("text=OpenAI rejected this API key")
@@ -248,7 +285,11 @@ def main():
               page.locator("text=OpenAI rejected this API key").is_visible())
         api_key = "sk-e2e-secret-do-not-persist"
         page.get_by_role("button", name="Tempo Agent settings").click()
-        page.get_by_role("textbox", name="OpenAI API key").fill(api_key)
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        openai_row = page.locator("[data-provider-id='openai']")
+        openai_row.get_by_role("button", name="Change key").click()
+        openai_row.get_by_role("textbox", name="OpenAI API key").fill(api_key)
+        openai_row.get_by_role("button", name="Save key").click()
         page.get_by_role("button", name="Done").click()
         composer.fill("Schedule a study session tomorrow at 2 PM")
         composer.press("Enter")
@@ -262,7 +303,7 @@ def main():
         check("chat mutation uses calendar store",
               any(e["title"] == "E2E Study Session" for e in saved_events))
         stored_chat_raw = page.evaluate("localStorage.getItem('tempo:agent-chat:v2')")
-        stored_settings_raw = page.evaluate("localStorage.getItem('tempo:ai-settings:v1')")
+        stored_settings_raw = page.evaluate("localStorage.getItem('tempo:ai-settings:v2')")
         check("chat v2 persisted",
               json.loads(stored_chat_raw)["version"] == 2)
         check("api key excluded from transcript", api_key not in stored_chat_raw)
@@ -287,8 +328,12 @@ def main():
               page.locator("text=Not configured").is_visible())
 
         page.get_by_role("button", name="Tempo Agent settings").click()
-        page.get_by_role("textbox", name="OpenAI API key").fill(api_key)
-        page.get_by_role("switch", name="Remember API key on this device").click()
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        openai_row = page.locator("[data-provider-id='openai']")
+        openai_row.get_by_role("button", name="Add key").click()
+        openai_row.get_by_role("textbox", name="OpenAI API key").fill(api_key)
+        openai_row.get_by_role("switch", name="Remember OpenAI API key").click()
+        openai_row.get_by_role("button", name="Save key").click()
         page.get_by_role("button", name="Done").click()
         check("opt-in key persistence",
               page.evaluate("localStorage.getItem('tempo:ai-key:openai:v1')") == api_key)
@@ -297,15 +342,70 @@ def main():
         check("remembered key restores configuration",
               page.locator("text=Not configured").count() == 0)
         page.get_by_role("button", name="Tempo Agent settings").click()
-        check("remembered key loads",
-              page.get_by_role("textbox", name="OpenAI API key").input_value() == api_key)
-        page.get_by_role("button", name="Clear key").click()
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        openai_row = page.locator("[data-provider-id='openai']")
+        check("remembered key loads masked",
+              openai_row.get_by_text("Saved on this device").is_visible()
+              and openai_row.get_by_text("••••••••sist").is_visible())
+        openai_row.get_by_role("button", name="Reveal OpenAI API key").click()
+        check("remembered key explicit reveal",
+              openai_row.get_by_text(api_key, exact=True).is_visible())
+        openai_row.get_by_role("button", name="Clear").click()
         page.get_by_role("button", name="Done").click()
         check("clear key removes persisted credential",
               page.evaluate("localStorage.getItem('tempo:ai-key:openai:v1')") is None)
 
+        # Multiple provider keys, dynamic model search/switching, deferred
+        # NVIDIA status, and clear-all confirmation.
         page.get_by_role("button", name="Tempo Agent settings").click()
-        page.get_by_role("textbox", name="OpenAI API key").fill("sk-cancel-test")
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        check("all provider rows shown",
+              page.locator("[data-provider-id]").count() == 5)
+        nvidia_row = page.locator("[data-provider-id='nvidia-nim']")
+        check("nvidia deferred row",
+              nvidia_row.get_by_text("Unavailable in browser", exact=True).is_visible())
+        openrouter_row = page.locator("[data-provider-id='openrouter']")
+        openrouter_row.get_by_role("button", name="Add key").click()
+        openrouter_row.get_by_role("textbox", name="OpenRouter API key").fill("sk-or-memory")
+        openrouter_row.get_by_role("button", name="Save key").click()
+        gemini_row = page.locator("[data-provider-id='gemini']")
+        gemini_row.get_by_role("button", name="Add key").click()
+        gemini_row.get_by_role("textbox", name="Google Gemini API key").fill("gemini-saved")
+        gemini_row.get_by_role("switch", name="Remember Google Gemini API key").click()
+        gemini_row.get_by_role("button", name="Save key").click()
+        check("provider keys remain separate",
+              page.evaluate("localStorage.getItem('tempo:ai-key:openrouter:v1')") is None
+              and page.evaluate("localStorage.getItem('tempo:ai-key:gemini:v1')") == "gemini-saved")
+
+        page.get_by_role("tab", name="General", exact=True).click()
+        page.get_by_role("combobox", name="Provider").select_option("openrouter")
+        page.get_by_role("button", name="Select AI model").click()
+        page.get_by_role("textbox", name="Search models").fill("GPT-5")
+        page.get_by_role("button", name="OpenAI: GPT-5 mini").click()
+        check("provider switch and model search",
+              json.loads(page.evaluate("localStorage.getItem('tempo:ai-settings:v2')"))
+              ["models"]["openrouter"] == "openai/gpt-5-mini")
+
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        page.get_by_role("button", name="Clear all API keys").click()
+        page.get_by_role("button", name="Cancel").last.click()
+        check("clear all requires confirmation",
+              page.locator("[data-provider-id='openrouter']").get_by_text("Configured").is_visible())
+        page.get_by_role("button", name="Clear all API keys").click()
+        page.get_by_role("button", name="Clear all API keys").last.click()
+        check("clear all removes provider keys",
+              page.evaluate("localStorage.getItem('tempo:ai-key:gemini:v1')") is None
+              and page.locator("[data-provider-id='openrouter']").get_by_text("Not configured").is_visible())
+        page.get_by_role("button", name="Done").click()
+
+        page.get_by_role("button", name="Tempo Agent settings").click()
+        page.get_by_role("tab", name="API Keys", exact=True).click()
+        openai_row = page.locator("[data-provider-id='openai']")
+        openai_row.get_by_role("button", name="Add key").click()
+        openai_row.get_by_role("textbox", name="OpenAI API key").fill("sk-cancel-test")
+        openai_row.get_by_role("button", name="Save key").click()
+        page.get_by_role("tab", name="General", exact=True).click()
+        page.get_by_role("combobox", name="Provider").select_option("openai")
         page.get_by_role("button", name="Done").click()
         composer.fill("Cancel this request")
         composer.press("Enter")

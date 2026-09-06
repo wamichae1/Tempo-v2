@@ -1,12 +1,46 @@
 import type { AgentTool } from "@/features/agent/agent-tool";
 import type { AgentErrorCode } from "@/features/agent/agent-chat-state";
 
-export type AiProviderId = "openai";
+export type AiProviderId =
+  | "openai"
+  | "openrouter"
+  | "opencode"
+  | "gemini"
+  | "nvidia-nim";
+
+export type RunnableAiProviderId = Exclude<AiProviderId, "nvidia-nim">;
+
+export type AiProviderAvailability = "enabled" | "deferred";
+
+export interface AiProviderMetadata {
+  id: AiProviderId;
+  displayName: string;
+  apiKeyStorageKey: string;
+  apiKeyPlaceholder: string;
+  defaultModelId: string;
+  availability: AiProviderAvailability;
+  unavailableReason?: string;
+}
+
+export interface AIModel {
+  id: string;
+  providerId: RunnableAiProviderId;
+  displayName: string;
+  owner?: string;
+  description?: string;
+  contextWindow?: number;
+  toolSupport: "supported" | "unsupported" | "unknown";
+}
 
 export interface AiProviderConfig {
-  provider: AiProviderId;
+  provider: RunnableAiProviderId;
   apiKey: string;
   model: string;
+}
+
+export interface AiModelDiscoveryRequest {
+  apiKey: string;
+  signal: AbortSignal;
 }
 
 export interface AiConversationMessage {
@@ -59,7 +93,10 @@ export type AiProviderEvent =
   | { type: "completed"; result: AiProviderTurnResult };
 
 export interface AiProvider {
-  readonly id: AiProviderId;
+  readonly id: RunnableAiProviderId;
+  readonly metadata: AiProviderMetadata;
+  normalizeApiKey(value: string): string;
+  discoverModels(request: AiModelDiscoveryRequest): Promise<AIModel[]>;
   stream(request: AiProviderRequest): AsyncIterable<AiProviderEvent>;
 }
 

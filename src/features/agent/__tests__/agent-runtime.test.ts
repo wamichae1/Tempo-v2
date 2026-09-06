@@ -15,6 +15,16 @@ function providerWith(
   let index = 0;
   return {
     id: "openai",
+    metadata: {
+      id: "openai",
+      displayName: "Test provider",
+      apiKeyStorageKey: "test",
+      apiKeyPlaceholder: "test",
+      defaultModelId: "test-model",
+      availability: "enabled",
+    },
+    normalizeApiKey: (value) => value.trim(),
+    discoverModels: async () => [],
     async *stream(request) {
       const turn = turns[index];
       index += 1;
