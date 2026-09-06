@@ -8,18 +8,24 @@ import {
 } from "@/features/agent/ai/provider-registry";
 
 describe("AI provider registry", () => {
-  it("registers four runnable providers and deferred NVIDIA metadata", () => {
+  it("registers browser-runnable providers and deferred provider metadata", () => {
     expect(listRunnableAiProviders().map((item) => item.metadata.id)).toEqual([
       "openai",
       "openrouter",
-      "opencode",
       "gemini",
     ]);
     expect(listAiProviderDefinitions()).toHaveLength(5);
+    expect(getAiProviderDefinition("opencode").metadata).toMatchObject({
+      availability: "deferred",
+      availabilityLabel: "Unavailable in browser",
+    });
     expect(getAiProviderDefinition("nvidia-nim").metadata).toMatchObject({
       availability: "deferred",
+      availabilityLabel: "Coming soon",
       apiKeyStorageKey: "tempo:ai-key:nvidia-nim:v1",
+      unavailableReason: "NVIDIA NIM browser support is coming soon.",
     });
+    expect(getAiProviderDefinition("nvidia-nim").create).toBeUndefined();
   });
 
   it("creates providers with matching metadata and key handling", () => {

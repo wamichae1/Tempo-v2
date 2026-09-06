@@ -4,7 +4,7 @@ import type {
 import {
   getAiProviderDefinition,
   isRunnableAiProviderId,
-  listRunnableAiProviders,
+  listAiProviderDefinitions,
 } from "@/features/agent/ai/provider-registry";
 
 export const AI_SETTINGS_V1_STORAGE_KEY = "tempo:ai-settings:v1";
@@ -33,10 +33,12 @@ export interface LoadedAiSettings {
 
 export function defaultProviderModels(): ProviderModels {
   return Object.fromEntries(
-    listRunnableAiProviders().map((definition) => [
-      definition.metadata.id,
-      definition.metadata.defaultModelId,
-    ]),
+    listAiProviderDefinitions()
+      .filter((definition) => definition.create)
+      .map((definition) => [
+        definition.metadata.id,
+        definition.metadata.defaultModelId,
+      ]),
   ) as ProviderModels;
 }
 
@@ -55,6 +57,8 @@ function parseV2(raw: string | null): StoredAiSettingsV2 | null {
     if (
       parsed.version !== 2 ||
       !isRunnableAiProviderId(parsed.provider) ||
+      getAiProviderDefinition(parsed.provider).metadata.availability !==
+        "enabled" ||
       typeof parsed.models !== "object" ||
       parsed.models === null
     ) {

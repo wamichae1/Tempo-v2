@@ -73,12 +73,17 @@ describe("AI settings and API key storage", () => {
     expect(storage.getItem(getApiKeyStorageKey("openai"))).toBeNull();
 
     persistApiKey(storage, "openrouter", "sk-or-test", true);
+    persistApiKey(storage, "opencode", "sk-opencode-test", true);
     persistApiKey(storage, "gemini", "gemini-test", true);
     const loaded = loadPersistedApiKeys(storage);
     expect(loaded.openrouter).toMatchObject({
       value: "sk-or-test",
       persisted: true,
     });
+    expect(loaded.opencode.value).toBe("");
+    expect(storage.getItem(getApiKeyStorageKey("opencode"))).toBe(
+      "sk-opencode-test",
+    );
     expect(loaded.gemini.value).toBe("gemini-test");
     expect(loaded.openai.value).toBe("");
   });
@@ -96,6 +101,29 @@ describe("AI settings and API key storage", () => {
     }
     clearAllPersistedApiKeys(storage);
     expect(storage.length).toBe(0);
+  });
+
+  it("falls back from a deferred OpenCode selection without deleting its key", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      AI_SETTINGS_V2_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        provider: "opencode",
+        models: {
+          openai: "gpt-test",
+          openrouter: "openrouter-test",
+          opencode: "gpt-5.4-mini",
+          gemini: "gemini-3.7-flash",
+        },
+      }),
+    );
+    persistApiKey(storage, "opencode", "saved-opencode-key", true);
+
+    expect(loadAiSettings(storage).settings.provider).toBe("openai");
+    expect(storage.getItem(getApiKeyStorageKey("opencode"))).toBe(
+      "saved-opencode-key",
+    );
   });
 
   it("masks API keys by default while retaining only the final four characters", () => {

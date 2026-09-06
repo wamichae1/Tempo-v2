@@ -1,7 +1,18 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const providerMocks = vi.hoisted(() => ({
+  discoverModels: vi.fn(),
+}));
+
+vi.mock("@/features/agent/ai/provider-registry", () => ({
+  createAiProvider: () => ({
+    discoverModels: providerMocks.discoverModels,
+  }),
+}));
 
 import {
   cacheModels,
+  discoverAndCacheModels,
   getCachedModels,
   invalidateModelCache,
   searchModels,
@@ -37,5 +48,29 @@ describe("model catalog", () => {
     expect(searchModels(models, "flash")).toHaveLength(1);
     expect(searchModels(models, "VENDOR")).toHaveLength(2);
     expect(searchModels(models, "pro")).toEqual([models[1]]);
+  });
+
+  it("reuses models cached during key validation", async () => {
+    providerMocks.discoverModels.mockResolvedValue(models);
+    const signal = new AbortController().signal;
+    await expect(
+      discoverAndCacheModels({
+        provider: "openrouter",
+        apiKey: "validation-only-secret",
+        revision: 4,
+        signal,
+        force: true,
+      }),
+    ).resolves.toEqual(models);
+    await expect(
+      discoverAndCacheModels({
+        provider: "openrouter",
+        apiKey: "validation-only-secret",
+        revision: 4,
+        signal,
+      }),
+    ).resolves.toEqual(models);
+    expect(providerMocks.discoverModels).toHaveBeenCalledOnce();
+    expect(JSON.stringify(models)).not.toContain("validation-only-secret");
   });
 });

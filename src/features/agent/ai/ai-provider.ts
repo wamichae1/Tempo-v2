@@ -19,6 +19,7 @@ export interface AiProviderMetadata {
   apiKeyPlaceholder: string;
   defaultModelId: string;
   availability: AiProviderAvailability;
+  availabilityLabel?: string;
   unavailableReason?: string;
 }
 

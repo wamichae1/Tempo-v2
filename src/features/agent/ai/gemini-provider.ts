@@ -26,8 +26,11 @@ interface GeminiContinuation {
 interface GeminiStreamEvent {
   event_type?: unknown;
   type?: unknown;
-  delta?: { text?: unknown };
-  interaction?: { outputs?: unknown };
+  index?: unknown;
+  step_index?: unknown;
+  step?: unknown;
+  delta?: unknown;
+  error?: unknown;
 }
 
 function continuationInput(value: unknown): unknown[] {
@@ -41,31 +44,85 @@ function continuationInput(value: unknown): unknown[] {
   return [];
 }
 
-function extractOutputs(outputs: unknown): {
+function cloneRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return structuredClone(value as Record<string, unknown>);
+}
+
+function textFromContent(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part !== "object" || part === null) return "";
+      const item = part as Record<string, unknown>;
+      return item.type === "text" && typeof item.text === "string"
+        ? item.text
+        : "";
+    })
+    .join("");
+}
+
+function appendTextDelta(step: Record<string, unknown>, text: string): void {
+  const content = Array.isArray(step.content)
+    ? structuredClone(step.content)
+    : [];
+  const last = content.at(-1);
+  if (
+    typeof last === "object" &&
+    last !== null &&
+    (last as Record<string, unknown>).type === "text" &&
+    typeof (last as Record<string, unknown>).text === "string"
+  ) {
+    (last as Record<string, unknown>).text += text;
+  } else {
+    content.push({ type: "text", text });
+  }
+  step.content = content;
+}
+
+function eventIndex(event: GeminiStreamEvent, fallback: number): number {
+  if (typeof event.index === "number") return event.index;
+  if (typeof event.step_index === "number") return event.step_index;
+  return fallback;
+}
+
+function argumentsText(value: unknown): string {
+  return typeof value === "string"
+    ? value
+    : JSON.stringify(value ?? {});
+}
+
+function parseArguments(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function extractSteps(steps: unknown[]): {
   text: string;
   toolCalls: AiProviderTurnResult["toolCalls"];
 } {
-  if (!Array.isArray(outputs)) return { text: "", toolCalls: [] };
   let text = "";
   const toolCalls: AiProviderTurnResult["toolCalls"] = [];
-  for (const output of outputs) {
-    if (typeof output !== "object" || output === null) continue;
-    const item = output as Record<string, unknown>;
-    if (item.type === "text" && typeof item.text === "string") {
-      text += item.text;
+  for (const step of steps) {
+    if (typeof step !== "object" || step === null) continue;
+    const item = step as Record<string, unknown>;
+    if (item.type === "model_output") {
+      text += textFromContent(item.content);
     }
     if (
       item.type === "function_call" &&
-      typeof item.call_id === "string" &&
+      typeof item.id === "string" &&
       typeof item.name === "string"
     ) {
       toolCalls.push({
-        callId: item.call_id,
+        callId: item.id,
         name: item.name,
-        argumentsText:
-          typeof item.arguments === "string"
-            ? item.arguments
-            : JSON.stringify(item.arguments ?? {}),
+        argumentsText: argumentsText(item.arguments),
       });
     }
   }
@@ -78,7 +135,7 @@ function functionNameForCall(input: unknown[], callId: string): string | undefin
     const record = item as Record<string, unknown>;
     if (
       record.type === "function_call" &&
-      record.call_id === callId &&
+      record.id === callId &&
       typeof record.name === "string"
     ) {
       return record.name;
@@ -121,6 +178,37 @@ function classifyResponse(response: Response): AiProviderError {
       ? "Google Gemini is temporarily unavailable."
       : "Google Gemini could not complete the request.",
     response.status >= 500,
+  );
+}
+
+function classifyStreamError(event: GeminiStreamEvent): AiProviderError {
+  const error =
+    typeof event.error === "object" && event.error !== null
+      ? (event.error as Record<string, unknown>)
+      : {};
+  const code = error.code;
+  if (code === 401 || code === 403 || code === "UNAUTHENTICATED") {
+    return new AiProviderError(
+      "authentication",
+      "Google Gemini rejected this API key.",
+    );
+  }
+  if (code === 404 || code === "NOT_FOUND") {
+    return new AiProviderError(
+      "unsupported-model",
+      "Google Gemini could not find the configured model.",
+    );
+  }
+  if (code === 429 || code === "RESOURCE_EXHAUSTED") {
+    return new AiProviderError(
+      "rate-limit",
+      "Google Gemini rate-limited this request.",
+      true,
+    );
+  }
+  return new AiProviderError(
+    "provider",
+    "Google Gemini could not complete the request.",
   );
 }
 
@@ -193,7 +281,7 @@ export class GeminiProvider implements AiProvider {
     const priorInput =
       request.kind === "start"
         ? request.conversation.map((message) => ({
-            role: message.role === "assistant" ? "model" : "user",
+            type: message.role === "assistant" ? "model_output" : "user_input",
             content: [{ type: "text", text: message.text }],
           }))
         : continuationInput(request.continuation);
@@ -212,9 +300,10 @@ export class GeminiProvider implements AiProvider {
 
     let response: Response;
     try {
-      response = await fetch(`${GEMINI_API}/interactions?alt=sse`, {
+      response = await fetch(`${GEMINI_API}/interactions`, {
         method: "POST",
         headers: {
+          Accept: "text/event-stream",
           "Content-Type": "application/json",
           "x-goog-api-key": this.normalizeApiKey(request.config.apiKey),
         },
@@ -246,33 +335,94 @@ export class GeminiProvider implements AiProvider {
     if (!response.ok) throw classifyResponse(response);
 
     let streamedText = "";
-    let completed: AiProviderTurnResult | null = null;
+    let interactionCompleted = false;
+    const steps = new Map<
+      number,
+      { step: Record<string, unknown>; argumentsText: string }
+    >();
     for await (const rawEvent of readJsonSse(response, request.signal)) {
       const event = rawEvent as GeminiStreamEvent;
       const eventType = event.event_type ?? event.type;
-      if (eventType === "step.delta" && typeof event.delta?.text === "string") {
-        streamedText += event.delta.text;
-        yield { type: "text-delta", text: event.delta.text };
+      if (eventType === "error") throw classifyStreamError(event);
+
+      if (eventType === "step.start") {
+        const step = cloneRecord(event.step);
+        if (!step) continue;
+        const index = eventIndex(event, steps.size);
+        const initialText =
+          step.type === "model_output" ? textFromContent(step.content) : "";
+        if (initialText) {
+          streamedText += initialText;
+          yield { type: "text-delta", text: initialText };
+        }
+        steps.set(index, {
+          step,
+          argumentsText: "",
+        });
       }
-      if (eventType === "interaction.complete") {
-        const outputs = event.interaction?.outputs;
-        const normalized = extractOutputs(outputs);
-        completed = {
-          text: normalized.text || streamedText,
-          toolCalls: normalized.toolCalls,
-          continuation: {
-            input: [...input, ...(Array.isArray(outputs) ? outputs : [])],
-          } satisfies GeminiContinuation,
-        };
+
+      if (eventType === "step.delta") {
+        const delta = cloneRecord(event.delta);
+        if (!delta) continue;
+        const index = eventIndex(event, Math.max(steps.size - 1, 0));
+        const current = steps.get(index);
+        if (!current) continue;
+        if (delta.type === "text" && typeof delta.text === "string") {
+          appendTextDelta(current.step, delta.text);
+          streamedText += delta.text;
+          yield { type: "text-delta", text: delta.text };
+        }
+        if (
+          (delta.type === "arguments_delta" ||
+            delta.type === "function_call_arguments") &&
+          (typeof delta.arguments === "string" ||
+            typeof delta.arguments_delta === "string")
+        ) {
+          current.argumentsText +=
+            typeof delta.arguments === "string"
+              ? delta.arguments
+              : delta.arguments_delta as string;
+          current.step.arguments = parseArguments(current.argumentsText);
+        }
+      }
+
+      if (eventType === "step.stop") {
+        const step = cloneRecord(event.step);
+        if (!step) continue;
+        const index = eventIndex(event, Math.max(steps.size - 1, 0));
+        steps.set(index, {
+          step,
+          argumentsText:
+            step.type === "function_call"
+              ? argumentsText(step.arguments)
+              : "",
+        });
+      }
+
+      if (eventType === "interaction.completed") {
+        interactionCompleted = true;
       }
     }
-    if (!completed) {
+    if (!interactionCompleted) {
       throw new AiProviderError(
         "malformed-response",
         "Google Gemini ended the stream without a completed interaction.",
         true,
       );
     }
-    yield { type: "completed", result: completed };
+    const completedSteps = [...steps.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, value]) => value.step);
+    const normalized = extractSteps(completedSteps);
+    yield {
+      type: "completed",
+      result: {
+        text: normalized.text || streamedText,
+        toolCalls: normalized.toolCalls,
+        continuation: {
+          input: [...input, ...completedSteps],
+        } satisfies GeminiContinuation,
+      },
+    };
   }
 }

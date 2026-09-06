@@ -2,6 +2,7 @@ import type {
   AIModel,
   RunnableAiProviderId,
 } from "@/features/agent/ai/ai-provider";
+import { createAiProvider } from "@/features/agent/ai/provider-registry";
 
 const MODEL_CACHE_TTL_MS = 5 * 60_000;
 
@@ -39,6 +40,32 @@ export function cacheModels(
 export function invalidateModelCache(provider?: RunnableAiProviderId): void {
   if (provider) cache.delete(provider);
   else cache.clear();
+}
+
+export async function discoverAndCacheModels({
+  provider,
+  apiKey,
+  revision,
+  signal,
+  force = false,
+}: {
+  provider: RunnableAiProviderId;
+  apiKey: string;
+  revision: number;
+  signal: AbortSignal;
+  force?: boolean;
+}): Promise<AIModel[]> {
+  if (!force) {
+    const cached = getCachedModels(provider, revision);
+    if (cached) return cached;
+  }
+  const models = await createAiProvider(provider).discoverModels({
+    apiKey,
+    signal,
+  });
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  cacheModels(provider, revision, models);
+  return models;
 }
 
 export function searchModels(models: AIModel[], query: string): AIModel[] {

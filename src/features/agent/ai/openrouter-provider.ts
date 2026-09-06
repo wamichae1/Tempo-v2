@@ -33,13 +33,32 @@ export class OpenRouterProvider implements AiProvider {
   }
 
   async discoverModels(request: AiModelDiscoveryRequest): Promise<AIModel[]> {
+    const authorization = `Bearer ${this.normalizeApiKey(request.apiKey)}`;
     let response: Response;
     try {
-      response = await fetch("https://openrouter.ai/api/v1/models", {
-        headers: { Authorization: `Bearer ${this.normalizeApiKey(request.apiKey)}` },
+      const keyResponse = await fetch("https://openrouter.ai/api/v1/key", {
+        headers: { Authorization: authorization },
         signal: request.signal,
       });
-    } catch {
+      if (keyResponse.status === 401 || keyResponse.status === 403) {
+        throw new AiProviderError(
+          "authentication",
+          "OpenRouter rejected this API key.",
+        );
+      }
+      if (!keyResponse.ok) {
+        throw new AiProviderError(
+          "provider",
+          "OpenRouter could not validate this API key.",
+          keyResponse.status >= 500,
+        );
+      }
+      response = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: { Authorization: authorization },
+        signal: request.signal,
+      });
+    } catch (error) {
+      if (error instanceof AiProviderError) throw error;
       if (request.signal.aborted) {
         throw new AiProviderError("cancelled", "The request was cancelled.");
       }

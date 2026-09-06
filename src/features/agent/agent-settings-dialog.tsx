@@ -1,5 +1,13 @@
-import { useState } from "react";
-import { AlertTriangle, Eye, EyeOff, KeyRound } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LoaderCircle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -10,14 +18,19 @@ import type {
 } from "@/features/agent/ai/ai-provider";
 import {
   listAiProviderDefinitions,
-  listRunnableAiProviders,
 } from "@/features/agent/ai/provider-registry";
 import { maskApiKey } from "@/features/agent/ai/api-key-store";
+import type {
+  ApiKeyValidationFailure,
+} from "@/features/agent/ai/api-key-validation";
 import { useAiModels } from "@/features/agent/use-ai-models";
 import type { AiSettingsState } from "@/features/agent/use-ai-settings";
 import { cn } from "@/lib/utils";
 
 type SettingsPage = "general" | "api-keys";
+type ValidationAttempt =
+  | { status: "validating"; message: "" }
+  | ApiKeyValidationFailure;
 
 export function AgentSettingsDialog({
   open,
@@ -43,6 +56,10 @@ export function AgentSettingsDialog({
   const [rememberDraft, setRememberDraft] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [clearAllOpen, setClearAllOpen] = useState(false);
+  const [validationAttempts, setValidationAttempts] = useState<
+    Partial<Record<RunnableAiProviderId, ValidationAttempt>>
+  >({});
+  const validationSessionRef = useRef(0);
   const currentKeyState = settings.getKeyState(settings.provider);
   const catalog = useAiModels({
     provider: settings.provider,
@@ -51,20 +68,37 @@ export function AgentSettingsDialog({
     enabled: open && page === "general",
   });
 
-  const close = () => {
-    setPage("general");
+  const clearEditor = () => {
+    validationSessionRef.current += 1;
     setEditing(null);
     setKeyDraft("");
     setShowDraft(false);
+    setValidationAttempts({});
+  };
+
+  const close = () => {
+    setPage("general");
+    clearEditor();
     setRevealed(new Set());
     onClose();
   };
 
+  const navigateToPage = (nextPage: SettingsPage) => {
+    if (nextPage !== page) clearEditor();
+    setPage(nextPage);
+  };
+
   const startEditing = (provider: RunnableAiProviderId) => {
+    validationSessionRef.current += 1;
     setEditing(provider);
     setKeyDraft("");
     setRememberDraft(settings.getKeyState(provider).persisted);
     setShowDraft(false);
+    setValidationAttempts((current) => {
+      const next = { ...current };
+      delete next[provider];
+      return next;
+    });
   };
 
   const hasAnyKey = Object.values(settings.keyStates).some(
@@ -95,7 +129,7 @@ export function AgentSettingsDialog({
                 type="button"
                 role="tab"
                 aria-selected={page === id}
-                onClick={() => setPage(id)}
+                onClick={() => navigateToPage(id)}
                 className={cn(
                   "rounded-md px-2 py-1.5 text-left text-xs font-medium",
                   page === id
@@ -129,12 +163,16 @@ export function AgentSettingsDialog({
                     }
                     className="bg-background h-8 rounded-md border px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:opacity-60"
                   >
-                    {listRunnableAiProviders().map((definition) => (
+                    {listAiProviderDefinitions().map((definition) => (
                       <option
                         key={definition.metadata.id}
                         value={definition.metadata.id}
+                        disabled={definition.metadata.availability !== "enabled"}
                       >
                         {definition.metadata.displayName}
+                        {definition.metadata.availability !== "enabled"
+                          ? ` — ${definition.metadata.availabilityLabel}`
+                          : ""}
                       </option>
                     ))}
                   </select>
@@ -146,17 +184,28 @@ export function AgentSettingsDialog({
                     value={settings.model}
                     onChange={settings.setModel}
                     catalog={catalog}
-                    disabled={runtimeBusy}
+                    disabled={
+                      runtimeBusy || currentKeyState.status !== "verified"
+                    }
                   />
-                  {!currentKeyState.value && (
+                  {currentKeyState.status !== "verified" && (
                     <button
                       type="button"
                       className="text-muted-foreground w-fit text-left text-[10px] underline-offset-2 hover:underline"
-                      onClick={() => setPage("api-keys")}
+                      onClick={() => navigateToPage("api-keys")}
                     >
-                      Add a {listAiProviderDefinitions().find(
-                        (item) => item.metadata.id === settings.provider,
-                      )?.metadata.displayName} API key to load models.
+                      {currentKeyState.status === "validating"
+                        ? "Validating the saved API key..."
+                        : currentKeyState.status === "invalid"
+                          ? "The saved API key is invalid. Review API Keys."
+                          : currentKeyState.status === "error"
+                            ? "The provider could not validate the saved key. Review API Keys."
+                            : `Add a ${
+                                listAiProviderDefinitions().find(
+                                  (item) =>
+                                    item.metadata.id === settings.provider,
+                                )?.metadata.displayName
+                              } API key to load models.`}
                     </button>
                   )}
                 </div>
@@ -214,7 +263,7 @@ export function AgentSettingsDialog({
                               {definition.metadata.displayName}
                             </span>
                             <span className="text-muted-foreground text-[9px] uppercase">
-                              Unavailable in browser
+                              {definition.metadata.availabilityLabel}
                             </span>
                           </div>
                           <p className="text-muted-foreground mt-1 text-[10px]">
@@ -226,8 +275,21 @@ export function AgentSettingsDialog({
 
                     const providerId = id as RunnableAiProviderId;
                     const state = settings.getKeyState(providerId);
-                    const configured = state.value.trim().length > 0;
+                    const attempt = validationAttempts[providerId];
+                    const displayStatus = attempt?.status ?? state.status;
+                    const configured = state.status === "verified";
+                    const hasKey = state.value.trim().length > 0;
                     const isRevealed = revealed.has(providerId);
+                    const statusLabel =
+                      displayStatus === "verified"
+                        ? "Verified"
+                        : displayStatus === "validating"
+                          ? "Validating"
+                          : displayStatus === "invalid"
+                            ? "Invalid API key"
+                            : displayStatus === "error"
+                              ? "Provider unavailable"
+                              : "Not configured";
                     return (
                       <div
                         key={id}
@@ -243,15 +305,24 @@ export function AgentSettingsDialog({
                               <span
                                 className={cn(
                                   "font-mono text-[9px] uppercase",
-                                  configured
+                                  displayStatus === "verified"
                                     ? "text-event-green-border"
-                                    : "text-muted-foreground",
+                                    : displayStatus === "invalid" ||
+                                        displayStatus === "error"
+                                      ? "text-destructive"
+                                      : "text-muted-foreground",
                                 )}
                               >
-                                {configured ? "Configured" : "Not configured"}
+                                {statusLabel}
                               </span>
+                              {displayStatus === "validating" && (
+                                <LoaderCircle className="text-muted-foreground size-3 animate-spin" />
+                              )}
+                              {displayStatus === "verified" && (
+                                <CheckCircle2 className="size-3 text-event-green-border" />
+                              )}
                             </div>
-                            {configured && (
+                            {hasKey && (
                               <>
                                 <div className="mt-1 flex items-center gap-1.5">
                                   <code className="min-w-0 truncate text-[10px]">
@@ -295,6 +366,13 @@ export function AgentSettingsDialog({
                                 </p>
                               </>
                             )}
+                            {!attempt &&
+                              (state.status === "invalid" ||
+                                state.status === "error") && (
+                                <p className="text-destructive mt-1 text-[10px]">
+                                  {state.error}
+                                </p>
+                              )}
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <Button
@@ -304,19 +382,77 @@ export function AgentSettingsDialog({
                               disabled={runtimeBusy}
                               onClick={() => startEditing(providerId)}
                             >
-                              {configured ? "Change key" : "Add key"}
+                              {hasKey ? "Change key" : "Add key"}
                             </Button>
-                            {configured && (
+                            {hasKey && (
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                disabled={runtimeBusy}
-                                onClick={() => settings.clearApiKey(providerId)}
+                                disabled={
+                                  runtimeBusy ||
+                                  displayStatus === "validating"
+                                }
+                                onClick={() => {
+                                  settings.clearApiKey(providerId);
+                                  setValidationAttempts((current) => {
+                                    const next = { ...current };
+                                    delete next[providerId];
+                                    return next;
+                                  });
+                                }}
                               >
                                 Clear
                               </Button>
                             )}
+                            {hasKey &&
+                              (state.status === "invalid" ||
+                                state.status === "error") && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={
+                                    runtimeBusy ||
+                                    displayStatus === "validating"
+                                  }
+                                  onClick={async () => {
+                                    const session =
+                                      validationSessionRef.current + 1;
+                                    validationSessionRef.current = session;
+                                    setValidationAttempts((current) => ({
+                                      ...current,
+                                      [providerId]: {
+                                        status: "validating",
+                                        message: "",
+                                      },
+                                    }));
+                                    const result =
+                                      await settings.retryApiKeyValidation(
+                                        providerId,
+                                      );
+                                    if (
+                                      validationSessionRef.current !== session
+                                    ) {
+                                      return;
+                                    }
+                                    setValidationAttempts((current) => {
+                                      const next = { ...current };
+                                      if (result.ok || result.cancelled) {
+                                        delete next[providerId];
+                                      } else {
+                                        next[providerId] = {
+                                          status: result.status,
+                                          message: result.message,
+                                        };
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  Retry
+                                </Button>
+                              )}
                           </div>
                         </div>
 
@@ -327,7 +463,15 @@ export function AgentSettingsDialog({
                                 type={showDraft ? "text" : "password"}
                                 value={keyDraft}
                                 onChange={(event) =>
-                                  setKeyDraft(event.target.value)
+                                  {
+                                    validationSessionRef.current += 1;
+                                    setKeyDraft(event.target.value);
+                                    setValidationAttempts((current) => {
+                                      const next = { ...current };
+                                      delete next[providerId];
+                                      return next;
+                                    });
+                                  }
                                 }
                                 placeholder={definition.metadata.apiKeyPlaceholder}
                                 autoComplete="off"
@@ -366,14 +510,28 @@ export function AgentSettingsDialog({
                                 aria-label={`Remember ${definition.metadata.displayName} API key`}
                               />
                             </label>
+                            {attempt &&
+                              attempt.status !== "validating" && (
+                                <div
+                                  className="text-destructive mt-2 flex items-start gap-1.5 text-[10px]"
+                                  role="alert"
+                                >
+                                  <AlertCircle className="mt-0.5 size-3 shrink-0" />
+                                  <span>
+                                    {attempt.message}
+                                    {configured
+                                      ? " The existing verified key was not changed."
+                                      : ""}
+                                  </span>
+                                </div>
+                              )}
                             <div className="mt-2 flex justify-end gap-1">
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => {
-                                  setEditing(null);
-                                  setKeyDraft("");
+                                  clearEditor();
                                 }}
                               >
                                 Cancel
@@ -381,19 +539,58 @@ export function AgentSettingsDialog({
                               <Button
                                 type="button"
                                 size="sm"
-                                disabled={!keyDraft.trim()}
-                                onClick={() => {
-                                  settings.saveApiKey(
+                                disabled={
+                                  !keyDraft.trim() ||
+                                  attempt?.status === "validating"
+                                }
+                                onClick={async () => {
+                                  const session =
+                                    validationSessionRef.current + 1;
+                                  validationSessionRef.current = session;
+                                  setValidationAttempts((current) => ({
+                                    ...current,
+                                    [providerId]: {
+                                      status: "validating",
+                                      message: "",
+                                    },
+                                  }));
+                                  const result = await settings.saveApiKey(
                                     providerId,
                                     keyDraft,
                                     rememberDraft,
                                   );
-                                  setEditing(null);
-                                  setKeyDraft("");
-                                  setShowDraft(false);
+                                  if (
+                                    validationSessionRef.current !== session
+                                  ) {
+                                    return;
+                                  }
+                                  if (result.ok) {
+                                    clearEditor();
+                                  } else if (!result.cancelled) {
+                                    setValidationAttempts((current) => ({
+                                      ...current,
+                                      [providerId]: {
+                                        status: result.status,
+                                        message: result.message,
+                                      },
+                                    }));
+                                  } else {
+                                    setValidationAttempts((current) => {
+                                      const next = { ...current };
+                                      delete next[providerId];
+                                      return next;
+                                    });
+                                  }
                                 }}
                               >
-                                Save key
+                                {attempt?.status === "validating" ? (
+                                  <>
+                                    <LoaderCircle className="size-3 animate-spin" />
+                                    Validating
+                                  </>
+                                ) : (
+                                  "Save key"
+                                )}
                               </Button>
                             </div>
                           </div>
@@ -466,6 +663,7 @@ export function AgentSettingsDialog({
               setEditing(null);
               setKeyDraft("");
               setRevealed(new Set());
+              setValidationAttempts({});
               setClearAllOpen(false);
             }}
           >

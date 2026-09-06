@@ -34,8 +34,8 @@ const definitions: readonly AiProviderDefinition[] = [
       apiKeyPlaceholder: "NVIDIA API key",
       defaultModelId: "",
       availability: "deferred",
-      unavailableReason:
-        "Unavailable in browser: NVIDIA's hosted endpoint does not support this static browser-direct deployment.",
+      availabilityLabel: "Coming soon",
+      unavailableReason: "NVIDIA NIM browser support is coming soon.",
     },
   },
 ];

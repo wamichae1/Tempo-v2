@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const openAiMocks = vi.hoisted(() => ({
   models: vi.fn(),
   responses: vi.fn(),
+  apiError: null as (Error & { status?: number; code?: string }) | null,
 }));
 
 vi.mock("openai", () => {
@@ -12,6 +13,7 @@ vi.mock("openai", () => {
     status?: number;
     code?: string;
   }
+  openAiMocks.apiError = new APIError();
   class OpenAI {
     static APIUserAbortError = APIUserAbortError;
     static APIConnectionError = APIConnectionError;
@@ -26,6 +28,7 @@ import type {
   AiProvider,
   AiProviderEvent,
 } from "@/features/agent/ai/ai-provider";
+import { runAgentTurn } from "@/features/agent/agent-runtime";
 import { GeminiProvider } from "@/features/agent/ai/gemini-provider";
 import { OpenAiProvider } from "@/features/agent/ai/openai-provider";
 import { OpenCodeProvider } from "@/features/agent/ai/opencode-provider";
@@ -120,6 +123,9 @@ describe("provider implementations", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
+        Response.json({ data: { label: "Tempo test key" } }),
+      )
+      .mockResolvedValueOnce(
         Response.json({
           data: [
             {
@@ -185,14 +191,15 @@ describe("provider implementations", () => {
         }),
       }),
     );
-    expect(fetchMock.mock.calls[1]?.[1]?.body).not.toContain("test-only-key");
+    expect(fetchMock.mock.calls[2]?.[1]?.body).not.toContain("test-only-key");
   });
 
   it("discovers and streams OpenCode Zen models", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
+    const fetchMock = vi
+      .fn()
+        .mockResolvedValueOnce(
+          new Response(null, { status: 400 }),
+        )
         .mockResolvedValueOnce(
           Response.json({
             data: [{ id: "gpt-test", owned_by: "opencode" }],
@@ -200,8 +207,8 @@ describe("provider implementations", () => {
         )
         .mockResolvedValueOnce(
           sseResponse([{ choices: [{ delta: { content: "Zen" } }] }]),
-        ),
-    );
+        );
+    vi.stubGlobal("fetch", fetchMock);
     const provider = new OpenCodeProvider();
     await expect(
       provider.discoverModels({
@@ -213,6 +220,12 @@ describe("provider implementations", () => {
     ]);
     const events = await collect(provider);
     expect(events).toContainEqual({ type: "text-delta", text: "Zen" });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://opencode.ai/zen/v1/responses",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      model: "gpt-5.4-mini",
+    });
   });
 
   it("discovers Gemini models and streams interaction function calls", async () => {
@@ -231,21 +244,50 @@ describe("provider implementations", () => {
       )
       .mockResolvedValueOnce(
         sseResponse([
-          { event_type: "step.delta", delta: { text: "Checking" } },
           {
-            event_type: "interaction.complete",
-            interaction: {
-              outputs: [
-                { type: "text", text: "Checking" },
-                {
-                  type: "function_call",
-                  call_id: "gemini-call",
-                  name: "tempo_test",
-                  arguments: { day: "today" },
-                },
-              ],
+            event_type: "interaction.start",
+          },
+          {
+            event_type: "step.start",
+            index: 0,
+            step: {
+              type: "model_output",
+              content: [{ type: "text", text: "Check" }],
             },
           },
+          {
+            event_type: "step.delta",
+            index: 0,
+            delta: { type: "text", text: "ing" },
+          },
+          {
+            event_type: "step.stop",
+            index: 0,
+          },
+          {
+            event_type: "step.start",
+            index: 1,
+            step: {
+              type: "function_call",
+              id: "gemini-call",
+              name: "tempo_test",
+              arguments: {},
+              thought_signature: "signature-to-preserve",
+            },
+          },
+          {
+            event_type: "step.delta",
+            index: 1,
+            delta: {
+              type: "arguments_delta",
+              arguments: "{\"day\":\"today\"}",
+            },
+          },
+          {
+            event_type: "step.stop",
+            index: 1,
+          },
+          { event_type: "interaction.completed" },
         ]),
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -259,6 +301,8 @@ describe("provider implementations", () => {
       expect.objectContaining({ id: "gemini-test", providerId: "gemini" }),
     ]);
     const events = await collect(provider);
+    expect(events).toContainEqual({ type: "text-delta", text: "Check" });
+    expect(events).toContainEqual({ type: "text-delta", text: "ing" });
     expect(events.at(-1)).toEqual(
       expect.objectContaining({
         type: "completed",
@@ -273,7 +317,25 @@ describe("provider implementations", () => {
       }),
     );
     const request = JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string);
-    expect(request).toMatchObject({ stream: true, store: false });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/interactions",
+    );
+    expect(request).toEqual({
+      model: "gemini-3.7-flash",
+      system_instruction: "Use tools safely.",
+      input: [{
+        type: "user_input",
+        content: [{ type: "text", text: "Hello" }],
+      }],
+      tools: [{
+        type: "function",
+        name: "tempo_test",
+        description: "Test tool",
+        parameters: { type: "object", properties: {} },
+      }],
+      stream: true,
+      store: false,
+    });
     expect(JSON.stringify(request)).not.toContain("test-only-key");
 
     const completed = events.at(-1);
@@ -281,10 +343,25 @@ describe("provider implementations", () => {
       throw new Error("expected a completed Gemini interaction");
     }
     fetchMock.mockResolvedValueOnce(
-      sseResponse([{
-        event_type: "interaction.complete",
-        interaction: { outputs: [{ type: "text", text: "Done" }] },
-      }]),
+      sseResponse([
+        {
+          event_type: "step.start",
+          index: 0,
+          step: {
+            type: "model_output",
+            content: [{ type: "text", text: "Done" }],
+          },
+        },
+        {
+          event_type: "step.stop",
+          index: 0,
+          step: {
+            type: "model_output",
+            content: [{ type: "text", text: "Done" }],
+          },
+        },
+        { event_type: "interaction.completed" },
+      ]),
     );
     for await (const event of provider.stream({
       kind: "continue",
@@ -310,5 +387,231 @@ describe("provider implementations", () => {
       name: "tempo_test",
       result: { ok: true },
     });
+    expect(continuationRequest.input).toContainEqual({
+      type: "function_call",
+      id: "gemini-call",
+      name: "tempo_test",
+      arguments: { day: "today" },
+      thought_signature: "signature-to-preserve",
+    });
   });
+
+  it("runs a Gemini agent tool call through its function-result continuation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            event_type: "step.start",
+            index: 0,
+            step: {
+              type: "function_call",
+              id: "agent-call",
+              name: "tempo_test",
+              arguments: {},
+              thought_signature: "agent-signature",
+            },
+          },
+          {
+            event_type: "step.delta",
+            index: 0,
+            delta: {
+              type: "arguments_delta",
+              arguments: "{\"day\":\"today\"}",
+            },
+          },
+          { event_type: "step.stop", index: 0 },
+          { event_type: "interaction.completed" },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            event_type: "step.start",
+            index: 0,
+            step: {
+              type: "model_output",
+              content: [{ type: "text", text: "Calendar checked." }],
+            },
+          },
+          { event_type: "step.stop", index: 0 },
+          { event_type: "interaction.completed" },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const execute = vi.fn().mockResolvedValue({ ok: true, events: [] });
+
+    await expect(
+      runAgentTurn({
+        provider: new GeminiProvider(),
+        config: {
+          provider: "gemini",
+          apiKey: "test-only-key",
+          model: "gemini-3.7-flash",
+        },
+        systemPrompt: "Use tools safely.",
+        conversation: [{ role: "user", text: "Check today." }],
+        tools: [{
+          name: "tempo_test",
+          description: "Test tool",
+          inputSchema: { type: "object", properties: {} },
+          execute,
+        }],
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      finalText: "Calendar checked.",
+      rounds: 2,
+      toolCalls: 1,
+    });
+    expect(execute).toHaveBeenCalledWith(
+      { day: "today" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    const continuationRequest = JSON.parse(
+      fetchMock.mock.calls[1]?.[1]?.body as string,
+    );
+    expect(continuationRequest.input).toContainEqual({
+      type: "function_result",
+      call_id: "agent-call",
+      name: "tempo_test",
+      result: { ok: true, events: [] },
+    });
+  });
+
+  it.each([
+    [400, "provider", false],
+    [404, "unsupported-model", false],
+    [429, "rate-limit", true],
+    [503, "provider", true],
+  ] as const)(
+    "classifies Gemini HTTP %s responses",
+    async (status, code, retryable) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValueOnce(new Response(null, { status })),
+      );
+      await expect(collect(new GeminiProvider())).rejects.toMatchObject({
+        code,
+        retryable,
+      });
+    },
+  );
+
+  it("classifies an OpenCode auth-probe fetch failure as network unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("CORS")));
+    await expect(
+      new OpenCodeProvider().discoverModels({
+        apiKey: "test",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      code: "network",
+      retryable: true,
+      message: expect.not.stringContaining("CORS"),
+    });
+  });
+
+  it("classifies Gemini stream errors without exposing upstream details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        sseResponse([{
+          event_type: "error",
+          error: {
+            code: "RESOURCE_EXHAUSTED",
+            message: "secret upstream detail",
+          },
+        }]),
+      ),
+    );
+    await expect(collect(new GeminiProvider())).rejects.toMatchObject({
+      code: "rate-limit",
+      retryable: true,
+      message: expect.not.stringContaining("secret upstream detail"),
+    });
+  });
+
+  it.each([
+    [400, true],
+    [422, true],
+    [401, false],
+    [403, false],
+    [409, false],
+    [429, false],
+    [500, false],
+  ] as const)(
+    "handles OpenCode auth probe status %s without accepting arbitrary 4xx",
+    async (status, accepted) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status }));
+      if (accepted) {
+        fetchMock.mockResolvedValueOnce(Response.json({ data: [] }));
+      }
+      vi.stubGlobal("fetch", fetchMock);
+      const result = new OpenCodeProvider().discoverModels({
+        apiKey: "test",
+        signal: new AbortController().signal,
+      });
+      if (accepted) {
+        await expect(result).resolves.toEqual([]);
+      } else {
+        await expect(result).rejects.toMatchObject({
+          code:
+            status === 401 || status === 403
+              ? "authentication"
+              : status === 429
+                ? "rate-limit"
+                : "provider",
+        });
+      }
+    },
+  );
+
+  it.each([401, 403])(
+    "rejects OpenAI model discovery authentication failures (%s)",
+    async (status) => {
+      const error = openAiMocks.apiError;
+      if (!error) throw new Error("OpenAI API error mock was not initialized");
+      error.status = status;
+      openAiMocks.models.mockRejectedValueOnce(error);
+      await expect(
+        new OpenAiProvider().discoverModels({
+          apiKey: "arbitrary-non-empty-text",
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "authentication",
+        message: expect.not.stringContaining("arbitrary-non-empty-text"),
+      });
+    },
+  );
+
+  it.each([
+    ["openrouter", () => new OpenRouterProvider()],
+    ["opencode", () => new OpenCodeProvider()],
+    ["gemini", () => new GeminiProvider()],
+  ] as const)(
+    "rejects %s discovery when the provider returns 401 or 403",
+    async (_name, createProvider) => {
+      const provider = createProvider();
+      for (const status of [401, 403]) {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValueOnce(new Response(null, { status })),
+        );
+        await expect(
+          provider.discoverModels({
+            apiKey: "arbitrary-non-empty-text",
+            signal: new AbortController().signal,
+          }),
+        ).rejects.toMatchObject({
+          code: "authentication",
+          message: expect.not.stringContaining("arbitrary-non-empty-text"),
+        });
+      }
+    },
+  );
 });

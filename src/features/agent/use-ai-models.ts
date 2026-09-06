@@ -5,11 +5,9 @@ import type {
   RunnableAiProviderId,
 } from "@/features/agent/ai/ai-provider";
 import {
-  cacheModels,
-  getCachedModels,
+  discoverAndCacheModels,
   invalidateModelCache,
 } from "@/features/agent/ai/model-catalog";
-import { createAiProvider } from "@/features/agent/ai/provider-registry";
 
 export type ModelCatalogStatus =
   | "idle"
@@ -57,32 +55,21 @@ export function useAiModels({
       };
     }
 
-    const cached = getCachedModels(provider, keyRevision);
-    if (cached) {
-      queueMicrotask(() => {
-        if (!active) return;
-        setModels(cached);
-        setError("");
-        setStatus(cached.length > 0 ? "loaded" : "empty");
-      });
-      return () => {
-        active = false;
-      };
-    }
-
     const controller = new AbortController();
-    const aiProvider = createAiProvider(provider);
     queueMicrotask(() => {
       if (!active || controller.signal.aborted) return;
       setModels([]);
       setError("");
       setStatus("loading");
     });
-    void aiProvider
-      .discoverModels({ apiKey, signal: controller.signal })
+    void discoverAndCacheModels({
+      provider,
+      apiKey,
+      revision: keyRevision,
+      signal: controller.signal,
+    })
       .then((discovered) => {
         if (controller.signal.aborted) return;
-        cacheModels(provider, keyRevision, discovered);
         setModels(discovered);
         setStatus(discovered.length > 0 ? "loaded" : "empty");
       })
