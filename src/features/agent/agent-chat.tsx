@@ -1,21 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bot,
   CheckCircle2,
   LoaderCircle,
+  Paperclip,
   SendHorizontal,
   Settings,
   Sparkles,
   Square,
   Trash2,
   Wrench,
+  X,
   XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TempoDialog } from "@/components/ui/tempo-dialog";
 import { AgentSettingsDialog } from "@/features/agent/agent-settings-dialog";
+import { getAiProviderDefinition } from "@/features/agent/ai/provider-registry";
+import { useAiModels } from "@/features/agent/use-ai-models";
 import type {
   AgentChatMessage,
   AgentChatState,
@@ -111,11 +115,46 @@ export function AgentChat({
 }) {
   const [clearOpen, setClearOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentKeyState = settings.getKeyState(settings.provider);
+  const catalog = useAiModels({
+    provider: settings.provider,
+    apiKey: settings.apiKey,
+    keyRevision: currentKeyState.revision,
+    enabled: true,
+  });
+
+  const composerLabel = useMemo(() => {
+    let providerName: string = settings.provider;
+    try {
+      providerName = getAiProviderDefinition(
+        settings.provider,
+      ).metadata.displayName;
+    } catch {
+      // Fall back to the raw provider id.
+    }
+    const modelId = settings.model.trim();
+    if (!modelId) return providerName;
+    const modelName =
+      catalog.models.find((model) => model.id === modelId)?.displayName ??
+      modelId;
+    return `${providerName} · ${modelName}`;
+  }, [catalog.models, settings.model, settings.provider]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [chat.entries, chat.runtimeStatus]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [chat.draft]);
 
   const submit = () => {
     if (!chat.configured) {
@@ -229,8 +268,55 @@ export function AgentChat({
       </div>
 
       <div className="shrink-0 border-t p-2.5">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+          onChange={(event) => {
+            setAttachment(event.target.files?.[0] ?? null);
+            event.target.value = "";
+          }}
+        />
+        {attachment && (
+          <div
+            className="bg-secondary/40 mb-1.5 flex items-center gap-1.5 rounded-md border px-2 py-1"
+            aria-label={`Selected file ${attachment.name}`}
+          >
+            <Paperclip className="text-muted-foreground size-3 shrink-0" />
+            <span className="min-w-0 truncate text-[10px]">
+              {attachment.name}
+            </span>
+            <span className="text-muted-foreground shrink-0 text-[9px]">
+              (not sent yet)
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground ml-auto size-4"
+              onClick={() => setAttachment(null)}
+              aria-label={`Remove ${attachment.name}`}
+            >
+              <X className="size-2.5" />
+            </Button>
+          </div>
+        )}
         <div className="focus-within:border-ring focus-within:ring-ring/30 flex items-end gap-1.5 rounded-md border bg-background p-1.5 focus-within:ring-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground size-7 shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach a file"
+            title="Attach a file (not sent to the model yet)"
+          >
+            <Paperclip className="size-3.5" />
+          </Button>
           <textarea
+            ref={textareaRef}
             value={chat.draft}
             onChange={(event) => chat.setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -279,7 +365,7 @@ export function AgentChat({
         <p className="text-muted-foreground mt-1.5 px-1 font-mono text-[9px]">
           {chat.isRunning
             ? "Tempo is working - stop to cancel"
-            : "Enter to send - Shift+Enter for a new line"}
+            : `${composerLabel} - Enter to send - Shift+Enter for a new line`}
         </p>
       </div>
 
