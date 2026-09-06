@@ -365,7 +365,7 @@ export function AgentChat({
         <p className="text-muted-foreground mt-1.5 px-1 font-mono text-[9px]">
           {chat.isRunning
             ? "Tempo is working - stop to cancel"
-            : `${composerLabel} - Enter to send - Shift+Enter for a new line`}
+            : composerLabel}
         </p>
       </div>
 

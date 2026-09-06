@@ -221,4 +221,26 @@ describe("AgentSettingsDialog API-key validation lifecycle", () => {
     expect(document.querySelector('[role="alert"]')).toBeNull();
     expect(document.body.textContent).toContain("Not configured");
   });
+
+  it("keeps the browser-direct security disclosure on the API Keys page", async () => {
+    const settings = createSettings(
+      structuredClone(EMPTY_API_KEY_STATES),
+      vi.fn<AiSettingsState["saveApiKey"]>(),
+    );
+    await act(async () => {
+      root.render(
+        <AgentSettingsDialog
+          open
+          onClose={vi.fn()}
+          settings={settings}
+          confirmationsEnabled
+          onConfirmationsEnabledChange={vi.fn()}
+        />,
+      );
+    });
+    await click("API Keys");
+    expect(document.body.textContent).toContain(
+      "Tempo has no backend and never receives your keys.",
+    );
+  });
 });

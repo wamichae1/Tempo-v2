@@ -188,6 +188,8 @@ describe("AgentChat composer", () => {
     expect(container.textContent).toContain(
       "Google Gemini · Gemini 3.7 Flash",
     );
+    expect(container.textContent).not.toContain("Enter to send");
+    expect(container.textContent).not.toContain("Shift+Enter");
   });
 
   it("falls back to the raw model id when the catalog has no match", async () => {
