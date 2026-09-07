@@ -9,6 +9,16 @@ A local-first calendar workspace built around [WebMCP](https://webmachinelearnin
 
 Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-class client: every calendar operation is exposed as a typed WebMCP tool that runs against the same calendar store the UI uses. An agent reads, schedules, moves, and deletes events exactly the way a human would — with the same persistence, undo history, and confirmation guardrails. No backend, no account, no sync service required.
 
+## Build Process
+
+The calendar structure is from [calendarcn](https://github.com/vmnog/calendarcn) by vmnog, which is a open source React calendar component. By taking the key basic features of the calendar I basically made a working standard calendar tool. Once calendarcn was implemented into Tempo, state management taken out of individual components so the agent would eventually be able to access the tools. A few additional tools added include the undo/redo feature, conflict detection which checks an event against other events instead of the full calendar and `localStorage` persistence so even locally the users data is saved on the browser. Other features include ICS import and export to make this usable, and some other smaller features such as choosing colors for different calendars.
+
+With the calendar working, I created WebMCP tools using the `document.modelContext`, so that an agent can perform actions on the calendar. This method allows for a user or an agent to use the exact same code when doing tasks, allowing the agent to complete tasks way more efficiently and accuractly. There is confirmation steps for `tempo_delete_event` and ` tempo_delete_calendar` so these can't be accidentally activated by the agent without approval. The tools are listed on the Tempo Agent WebMCP panel. 
+
+The newest change is relating to BYO API Key, which is relatively common nowadays. Throughout the developement of this project, ai was used. Many providers such as OpenRouter, NVIDIA NIM and Google Gemini have free plans with their API Keys so you can access some models. I like how this project won't cost me or the user any money to run. Since tempo has no backend, so requests go straight from the browser to your api provider. This however means that OpenCode and NVIDIA NIM won't work as they don't allow direct browser requesting. Future implementation of these and other similar providers means that Tempo will eventually need a backend proxy to relay the requests.
+
+
+
 ## Features
 
 - Month and week views, resizable layout
