@@ -11,21 +11,18 @@ Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-cla
 
 ## Features
 
-- **Month and week views** with a compact, resizable workspace layout
-- **Event editing** — create, edit, and delete events with a full detail panel
-- **Drag and resize** events directly on the grid, including all-day events
-- **All-day events** with a dedicated week-view all-day row
-- **Recurring events** — daily/weekly/monthly rules with interval, weekday, until, and count support
-- **Search** across event titles, descriptions, and locations
-- **Multiple calendars** with per-calendar colors and visibility toggles
-- **ICS import/export** (`.ics` files)
-- **Duplicate, copy, and paste** events via context menu
-- **Undo/redo** across all mutations
-- **Conflict detection** for overlapping events
-- **LocalStorage persistence** — your data survives reloads, locally
-- **Tempo Agent panel** with built-in Chat and a WebMCP tool inspector
-- **Bring-your-own-key AI chat** with direct browser-to-provider tool calling
-- **Responsive workspace** with resizable panels and dark/light themes
+- Month and week views, resizable layout
+- Create/edit/delete events with a full detail panel
+- Drag and resize events on the grid (works for all-day events too)
+- Recurring events: daily/weekly/monthly, with interval, weekday, until/count
+- Search across titles, descriptions, locations
+- Multiple calendars, each with its own color and visibility toggle
+- ICS import/export
+- Duplicate/copy/paste via context menu
+- Undo/redo for every mutation
+- Conflict detection for overlapping events
+- Dark/light themes
+
 
 ## Tempo Agent
 
@@ -41,7 +38,7 @@ The right-side Tempo Agent panel is the home for two related experiences:
 
 1. Open **Tempo Agent → Chat**.
 2. Open the settings dialog.
-3. Choose OpenAI, OpenRouter, OpenCode, or Google Gemini.
+3. Choose OpenAI, OpenRouter, or Google Gemini. Other providers such as OpenCode and NVIDIA NIM will be available soon.
 4. Add a separate API key for that provider. Leave **Remember API key** off to
    keep it in memory only, or explicitly enable it to store the key unencrypted
    in this browser's `localStorage`.
@@ -90,13 +87,7 @@ Tempo exposes its calendar functionality through [WebMCP](https://webmachinelear
 
 ## Tech stack
 
-- **React 19** + **TypeScript** + **Vite**
-- **Tailwind CSS v4** (via `@tailwindcss/vite`)
-- **shadcn-style components on Radix UI primitives** (`components/ui`)
-- Calendar UI derived from **CalendarCN** (`components/calendar`)
-- **WebMCP** (`document.modelContext`) for agent tooling
-- **date-fns**, **lucide-react**, **react-resizable-panels**, **Geist** typography
-- **LocalStorage** persistence, **ICS** import/export (no dependencies needed for either)
+React 19, TypeScript, Vite, Tailwind v4, Radix/shadcn-style components, date-fns, lucide-react, react-resizable-panels, Geist. No backend. ICS import/export and localStorage persistence are both handled without extra dependencies.
 
 ## Getting started
 
@@ -114,7 +105,7 @@ npm run lint     # run ESLint
 npm test         # run agent runtime/state/prompt tests
 ```
 
-## Architecture
+## Code layout
 
 ```
 src/
@@ -149,18 +140,10 @@ Tempo is fully local-first:
 
 ## Current limitations
 
-- No Google Calendar / Outlook or other account sync.
+- No Google Calendar / Outlook or other account sync. (you can still import/export these through ICS)
 - Recurrence editing applies to the **entire series** — no per-occurrence overrides.
 - ICS import/export uses floating local date-times; timezone (`VTIMEZONE`/`TZID`) handling is limited.
 - Data lives in one browser's `localStorage` — no multi-device sync.
-
-## Design
-
-Tempo follows a Vercel-inspired developer-workspace aesthetic: Geist typography, a compact calendar grid, resizable panels, and first-class dark and light themes.
-
-## OpenAI WebMCP Challenge
-
-Tempo was built for the **OpenAI WebMCP Challenge**. WebMCP isn't an add-on here — the calendar store, tool schemas, confirmation flow, and Agent Link panel were designed together so that agent-driven scheduling is a core part of the product.
 
 ## License
 
