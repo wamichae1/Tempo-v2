@@ -31,6 +31,7 @@ export function AgentPanel({
   onClose,
   chatModeRequest,
   openSettingsRequest,
+  onOpenWebMcpGuide,
 }: {
   agent: AgentToolsState;
   onClose?: () => void;
@@ -38,6 +39,8 @@ export function AgentPanel({
   chatModeRequest?: number;
   /** When this nonce changes, open the Agent settings dialog. */
   openSettingsRequest?: number;
+  /** Opens the existing WebMCP setup guide. */
+  onOpenWebMcpGuide?: () => void;
 }) {
   const [mode, setMode] = useState<AgentPanelMode>(loadMode);
   const settings = useAiSettings();
@@ -173,7 +176,10 @@ export function AgentPanel({
         hidden={mode !== "webmcp"}
         className={cn("min-h-0 flex-1", mode !== "webmcp" && "hidden")}
       >
-        <WebMcpInspector agent={agent} />
+        <WebMcpInspector
+          agent={agent}
+          onOpenWebMcpGuide={onOpenWebMcpGuide}
+        />
       </div>
     </div>
   );

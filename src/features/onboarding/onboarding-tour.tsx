@@ -6,63 +6,23 @@ import {
   TOUR_STEPS,
   type TourStep,
 } from "@/features/onboarding/onboarding-steps";
+import {
+  findVisibleTourTarget,
+  type TourTargetRect,
+} from "@/features/onboarding/tour-targeting";
 import type { TutorialCloseReason } from "@/features/onboarding/use-onboarding";
 import { cn } from "@/lib/utils";
 
-const PAD = 6;
 const TOOLTIP_W = 300;
 const TOOLTIP_GAP = 12;
 const VIEWPORT_MARGIN = 12;
-
-interface Rect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-function measureStep(step: TourStep): Rect | null {
-  const el =
-    document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`) ??
-    (step.fallbackTarget
-      ? document.querySelector<HTMLElement>(
-          `[data-tour="${step.fallbackTarget}"]`,
-        )
-      : null);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  // Skip elements that render with no box (hidden panels, display:none).
-  if (r.width < 2 || r.height < 2) {
-    if (step.fallbackTarget && el.dataset.tour !== step.fallbackTarget) {
-      const fallback = document.querySelector<HTMLElement>(
-        `[data-tour="${step.fallbackTarget}"]`,
-      );
-      const fr = fallback?.getBoundingClientRect();
-      if (fallback && fr && fr.width >= 2 && fr.height >= 2) {
-        return {
-          top: fr.top - PAD,
-          left: fr.left - PAD,
-          width: fr.width + PAD * 2,
-          height: fr.height + PAD * 2,
-        };
-      }
-    }
-    return null;
-  }
-  return {
-    top: r.top - PAD,
-    left: r.left - PAD,
-    width: r.width + PAD * 2,
-    height: r.height + PAD * 2,
-  };
-}
 
 const clamp = (v: number, min: number, max: number) =>
   Math.min(Math.max(v, min), Math.max(min, max));
 
 /** Position the tooltip near the spotlight, clamped into the viewport. */
 function placeTooltip(
-  spot: Rect | null,
+  spot: TourTargetRect | null,
   tip: { width: number; height: number },
   preferred: TourStep["preferredSide"],
 ): { top: number; left: number } {
@@ -111,6 +71,10 @@ export interface OnboardingTourProps {
   onClose: (reason: TutorialCloseReason) => void;
   /** Runs before measuring a step (e.g. expand the Agent panel). */
   onPrepareStep?: (step: TourStep) => void;
+  /** Reports the active step, and null when that step is left or unmounted. */
+  onStepChange?: (step: TourStep | null) => void;
+  /** Requests the temporary Step 3 event after no real target is visible. */
+  onRequestExampleEvent?: () => void;
 }
 
 /**
@@ -120,51 +84,139 @@ export interface OnboardingTourProps {
  * blocks background interaction. Focus stays inside the tooltip while the
  * tour is active.
  */
-export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) {
+export function OnboardingTour({
+  onClose,
+  onPrepareStep,
+  onStepChange,
+  onRequestExampleEvent,
+}: OnboardingTourProps) {
   const [index, setIndex] = useState(0);
-  const [spot, setSpot] = useState<Rect | null>(null);
+  const [spot, setSpot] = useState<TourTargetRect | null>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number }>({
     top: VIEWPORT_MARGIN,
     left: VIEWPORT_MARGIN,
   });
   const tipRef = useRef<HTMLDivElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
+  const measuredElementRef = useRef<HTMLElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const scheduledFrameRef = useRef<number | null>(null);
+  const scheduleMeasurementRef = useRef<() => void>(() => {});
+  const missingPassesRef = useRef(0);
+  const requestedExampleRef = useRef(false);
+  const prepareStepRef = useRef(onPrepareStep);
+  const stepChangeRef = useRef(onStepChange);
+  const requestExampleRef = useRef(onRequestExampleEvent);
   const step = TOUR_STEPS[index];
   const isLast = index === TOUR_STEPS.length - 1;
 
+  useEffect(() => {
+    prepareStepRef.current = onPrepareStep;
+    stepChangeRef.current = onStepChange;
+    requestExampleRef.current = onRequestExampleEvent;
+  }, [onPrepareStep, onRequestExampleEvent, onStepChange]);
+
   const remeasure = useCallback(() => {
-    const rect = measureStep(step);
-    setSpot(rect);
+    const measured = findVisibleTourTarget(step);
+    const hasPrimary = measured?.source === "primary";
+    if (hasPrimary) {
+      missingPassesRef.current = 0;
+    } else if (
+      step.createExampleWhenMissing &&
+      !requestedExampleRef.current
+    ) {
+      missingPassesRef.current += 1;
+      if (missingPassesRef.current >= 2) {
+        requestedExampleRef.current = true;
+        requestExampleRef.current?.();
+      } else {
+        scheduleMeasurementRef.current();
+      }
+    }
+
+    setSpot(measured?.rect ?? null);
+
+    if (measured?.element !== measuredElementRef.current) {
+      measuredElementRef.current = measured?.element ?? null;
+      resizeObserverRef.current?.disconnect();
+      if (typeof ResizeObserver !== "undefined" && measured?.element) {
+        const observer = new ResizeObserver(() =>
+          scheduleMeasurementRef.current(),
+        );
+        let current: HTMLElement | null = measured.element;
+        while (current) {
+          observer.observe(current);
+          current = current.parentElement;
+        }
+        resizeObserverRef.current = observer;
+      }
+    }
+
     const tipEl = tipRef.current;
     const tip = {
       width: tipEl?.offsetWidth ?? TOOLTIP_W,
       height: tipEl?.offsetHeight ?? 140,
     };
-    setTipPos(placeTooltip(rect, tip, step.preferredSide));
+    setTipPos(placeTooltip(measured?.rect ?? null, tip, step.preferredSide));
   }, [step]);
 
-  // Prepare the host UI, then measure once the layout settles.
+  // Prepare the host UI, then observe actual DOM/layout readiness.
   useEffect(() => {
-    onPrepareStep?.(step);
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(remeasure);
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-    };
-  }, [step, remeasure, onPrepareStep]);
+    missingPassesRef.current = 0;
+    requestedExampleRef.current = false;
+    measuredElementRef.current = null;
+    stepChangeRef.current?.(step);
+    prepareStepRef.current?.(step);
 
-  // Re-measure on viewport changes while the tour is open.
-  useEffect(() => {
-    window.addEventListener("resize", remeasure);
-    window.addEventListener("scroll", remeasure, true);
-    return () => {
-      window.removeEventListener("resize", remeasure);
-      window.removeEventListener("scroll", remeasure, true);
+    const scheduleMeasurement = () => {
+      if (scheduledFrameRef.current !== null) return;
+      scheduledFrameRef.current = requestAnimationFrame(() => {
+        scheduledFrameRef.current = null;
+        remeasure();
+      });
     };
-  }, [remeasure]);
+    scheduleMeasurementRef.current = scheduleMeasurement;
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver((mutations) => {
+            const overlay = document.querySelector(
+              '[data-testid="onboarding-tour"]',
+            );
+            if (
+              mutations.some(
+                (mutation) =>
+                  !overlay || !overlay.contains(mutation.target as Node),
+              )
+            ) {
+              scheduleMeasurement();
+            }
+          });
+    mutationObserver?.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+    });
+    window.addEventListener("resize", scheduleMeasurement);
+    window.addEventListener("scroll", scheduleMeasurement, true);
+    scheduleMeasurement();
+
+    return () => {
+      if (scheduledFrameRef.current !== null) {
+        cancelAnimationFrame(scheduledFrameRef.current);
+        scheduledFrameRef.current = null;
+      }
+      mutationObserver?.disconnect();
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      measuredElementRef.current = null;
+      window.removeEventListener("resize", scheduleMeasurement);
+      window.removeEventListener("scroll", scheduleMeasurement, true);
+      stepChangeRef.current?.(null);
+    };
+  }, [step, remeasure]);
 
   // Focus trap inside the tooltip; initial focus on Next.
   useEffect(() => {
@@ -199,7 +251,7 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70]"
+      className="pointer-events-none fixed inset-0 z-[70]"
       role="dialog"
       aria-modal="true"
       aria-label={`Tempo tutorial, step ${index + 1} of ${TOUR_STEPS.length}: ${step.title}`}
@@ -210,11 +262,17 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
       {spot ? (
         <>
           <div
-            className={cn("bg-background/70 absolute", transition)}
+            className={cn(
+              "bg-background/70 pointer-events-auto absolute",
+              transition,
+            )}
             style={{ top: 0, left: 0, right: 0, height: Math.max(spot.top, 0) }}
           />
           <div
-            className={cn("bg-background/70 absolute", transition)}
+            className={cn(
+              "bg-background/70 pointer-events-auto absolute",
+              transition,
+            )}
             style={{
               top: spot.top + spot.height,
               left: 0,
@@ -223,7 +281,10 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
             }}
           />
           <div
-            className={cn("bg-background/70 absolute", transition)}
+            className={cn(
+              "bg-background/70 pointer-events-auto absolute",
+              transition,
+            )}
             style={{
               top: spot.top,
               left: 0,
@@ -232,7 +293,10 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
             }}
           />
           <div
-            className={cn("bg-background/70 absolute", transition)}
+            className={cn(
+              "bg-background/70 pointer-events-auto absolute",
+              transition,
+            )}
             style={{
               top: spot.top,
               left: spot.left + spot.width,
@@ -242,6 +306,7 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
           />
           <div
             aria-hidden="true"
+            data-testid="onboarding-spotlight"
             className={cn(
               "ring-ring pointer-events-none absolute rounded-md ring-2",
               transition,
@@ -255,14 +320,14 @@ export function OnboardingTour({ onClose, onPrepareStep }: OnboardingTourProps) 
           />
         </>
       ) : (
-        <div className="bg-background/70 absolute inset-0" />
+        <div className="bg-background/70 pointer-events-auto absolute inset-0" />
       )}
 
       {/* Tooltip card */}
       <div
         ref={tipRef}
         className={cn(
-          "bg-popover text-popover-foreground absolute rounded-md border p-4 shadow-sm",
+          "bg-popover text-popover-foreground pointer-events-auto absolute rounded-md border p-4 shadow-sm",
           transition,
         )}
         style={{ top: tipPos.top, left: tipPos.left, width: TOOLTIP_W }}

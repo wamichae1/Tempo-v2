@@ -12,6 +12,8 @@ export interface TourStep {
   body: string;
   /** UI preparation the host must perform before measuring the target. */
   prepare?: "expand-assistant";
+  /** Ask the host to render an ephemeral example if no real target is visible. */
+  createExampleWhenMissing?: boolean;
   preferredSide?: "top" | "bottom" | "left" | "right";
 }
 
@@ -35,6 +37,7 @@ export const TOUR_STEPS: TourStep[] = [
     target: "event-item",
     fallbackTarget: "calendar",
     title: "Edit events directly",
+    createExampleWhenMissing: true,
     body: "Events aren't locked in place — drag them to move, drag their edges to resize, or click one to edit its details.",
     preferredSide: "left",
   },

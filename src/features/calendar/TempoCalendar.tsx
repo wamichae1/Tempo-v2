@@ -5,6 +5,7 @@ import {
   addWeeks,
   endOfMonth,
   endOfWeek,
+  isSameDay,
   isWithinInterval,
   startOfMonth,
   startOfWeek,
@@ -38,6 +39,12 @@ import { OnboardingTour } from "@/features/onboarding/onboarding-tour";
 import { OnboardingToast } from "@/features/onboarding/onboarding-toast";
 import { WebMcpGuide } from "@/features/onboarding/webmcp-guide";
 import type { TutorialCloseReason } from "@/features/onboarding/use-onboarding";
+import type { TourStep } from "@/features/onboarding/onboarding-steps";
+import {
+  isTutorialEvent,
+  TUTORIAL_EVENT_ID,
+  useTutorialExampleEvent,
+} from "@/features/onboarding/tutorial-event";
 import { useTheme } from "@/hooks/use-theme";
 import { expandEvents } from "@/lib/recurrence";
 import { findConflictingEventIds } from "@/lib/conflicts";
@@ -127,6 +134,13 @@ export function TempoCalendar() {
   });
   const [highlightHelp, setHighlightHelp] = useState(false);
   const [showCompletionToast, setShowCompletionToast] = useState(false);
+  const {
+    event: tutorialEvent,
+    request: requestExampleEvent,
+    update: updateExampleEvent,
+    clear: clearExampleEvent,
+    handleStepChange: updateExampleForStep,
+  } = useTutorialExampleEvent();
 
   useEffect(() => {
     localStorage.setItem(LS_VIEW, view);
@@ -157,6 +171,48 @@ export function TempoCalendar() {
     }));
   }, []);
 
+  const prepareTutorialStep = useCallback(
+    (step: TourStep) => {
+      if (step.id === "edit-events" && view === "month") {
+        setView("week");
+        setCurrentDate((date) =>
+          startOfWeek(date, { weekStartsOn: WEEK_STARTS_ON }),
+        );
+      }
+      if (step.prepare === "expand-assistant") openAssistantForTour();
+    },
+    [openAssistantForTour, view],
+  );
+
+  const handleTutorialStepChange = useCallback(
+    (step: TourStep | null) => {
+      updateExampleForStep(step);
+      if (step?.id !== "edit-events") {
+        setSelectedEventId((id) =>
+          id === TUTORIAL_EVENT_ID ? null : id,
+        );
+      }
+    },
+    [updateExampleForStep],
+  );
+
+  const requestTutorialEvent = useCallback(() => {
+    const intendedWeekStart =
+      view === "month"
+        ? startOfWeek(currentDate, { weekStartsOn: WEEK_STARTS_ON })
+        : currentDate;
+    const intendedVisibleDays =
+      view === "month"
+        ? getVisibleDays(intendedWeekStart, "week")
+        : visibleDays;
+    const now = new Date();
+    const targetDate =
+      intendedVisibleDays.find((day) => isSameDay(day, now)) ??
+      intendedVisibleDays[0] ??
+      intendedWeekStart;
+    requestExampleEvent(targetDate);
+  }, [currentDate, requestExampleEvent, view, visibleDays]);
+
   // Auto-start the tempo tutorial once per first launch, right after the
   // intro/landing overlay is dismissed (unless the user opted out).
   useEffect(() => {
@@ -164,6 +220,10 @@ export function TempoCalendar() {
   }, [introOpen, maybeAutoStartTutorial]);
 
   const handleTutorialClose = (reason: TutorialCloseReason) => {
+    clearExampleEvent();
+    setSelectedEventId((id) =>
+      id === TUTORIAL_EVENT_ID ? null : id,
+    );
     if (reason === "complete" || reason === "skip-all") {
       setHighlightHelp(true);
       setShowCompletionToast(true);
@@ -211,7 +271,7 @@ export function TempoCalendar() {
     // Calendar color is the event's visual identity: it always wins over a
     // stored per-event color. The event's own color is kept in the data model
     // (ICS round-trip) and used only as a fallback when the calendar is gone.
-    return expandEvents(events, rangeStart, rangeEnd)
+    const resolvedEvents = expandEvents(events, rangeStart, rangeEnd)
       .filter((e) => !hiddenCalendars.has(e.calendarId ?? ""))
       .map((e): CalendarEvent => {
         const calendarColor = colorByCalendar.get(e.calendarId ?? "");
@@ -220,7 +280,10 @@ export function TempoCalendar() {
         }
         return e.color ? e : { ...e, color: "blue" };
       });
-  }, [events, calendars, currentDate, view]);
+    return tutorialEvent
+      ? [...resolvedEvents, tutorialEvent]
+      : resolvedEvents;
+  }, [events, calendars, currentDate, view, tutorialEvent]);
 
   const conflictIds = useMemo(
     () => findConflictingEventIds(displayEvents),
@@ -296,12 +359,43 @@ export function TempoCalendar() {
 
   // --- Event actions --------------------------------------------------------
 
+  const handleEventChange = useCallback(
+    (event: CalendarEvent) => {
+      if (isTutorialEvent(event)) {
+        // Drag/resize hooks finalize inside their own state updater. Defer the
+        // parent update so React is not asked to update TempoCalendar while
+        // WeekView is still rendering that updater.
+        queueMicrotask(() => updateExampleEvent(event));
+        return;
+      }
+      updateEvent(event);
+    },
+    [updateEvent, updateExampleEvent],
+  );
+
   const handleEventDelete = useCallback(
     (event: CalendarEvent) => {
+      if (isTutorialEvent(event)) return;
       deleteEvent(event);
       setSelectedEventId(null);
     },
     [deleteEvent],
+  );
+
+  const handleCopyEvent = useCallback(
+    (event: CalendarEvent) => {
+      if (!isTutorialEvent(event)) copyEvent(event);
+    },
+    [copyEvent],
+  );
+
+  const handleDuplicateEvent = useCallback(
+    (event: CalendarEvent) => {
+      if (isTutorialEvent(event)) return;
+      const copy = duplicateEvent(event);
+      setSelectedEventId(copy.id);
+    },
+    [duplicateEvent],
   );
 
   const handleCreateEvent = useCallback(() => {
@@ -362,8 +456,8 @@ export function TempoCalendar() {
     undo,
     redo,
     selectedEvent,
-    copyEvent,
-    duplicateEvent,
+    copyEvent: handleCopyEvent,
+    duplicateEvent: handleDuplicateEvent,
     clipboard,
     paste: () => handlePaste(selectedEvent?.start ?? currentDate),
     toggleSidebar,
@@ -375,11 +469,8 @@ export function TempoCalendar() {
       calendars,
       events,
       conflictIds,
-      duplicateEvent: (event: CalendarEvent) => {
-        const copy = duplicateEvent(event);
-        setSelectedEventId(copy.id);
-      },
-      copyEvent,
+      duplicateEvent: handleDuplicateEvent,
+      copyEvent: handleCopyEvent,
       pasteEvent: handlePaste,
       hasClipboard: clipboard !== null,
       getCalendar: (id: string | undefined) =>
@@ -391,8 +482,8 @@ export function TempoCalendar() {
       events,
       conflictIds,
       store.updateCalendar,
-      duplicateEvent,
-      copyEvent,
+      handleDuplicateEvent,
+      handleCopyEvent,
       handlePaste,
       clipboard,
     ],
@@ -471,6 +562,7 @@ export function TempoCalendar() {
               onClose={toggleAssistant}
               chatModeRequest={assistantRequest.chatMode}
               openSettingsRequest={assistantRequest.openSettings}
+              onOpenWebMcpGuide={openGuide}
             />
           }
         >
@@ -485,7 +577,7 @@ export function TempoCalendar() {
                 onBackgroundClick={() => setSelectedEventId(null)}
                 onDateChange={setCurrentDate}
                 onVisibleDaysChange={setVisibleDays}
-                onEventChange={updateEvent}
+                onEventChange={handleEventChange}
                 onEventDelete={handleEventDelete}
                 onClosePopover={() => setSelectedEventId(null)}
                 onPrevWeek={goToPrevious}
@@ -502,7 +594,7 @@ export function TempoCalendar() {
                 events={displayEvents}
                 selectedEventId={selectedEvent?.id}
                 onEventClick={(event) => setSelectedEventId(event.id)}
-                onEventChange={updateEvent}
+                onEventChange={handleEventChange}
                 onEventDelete={handleEventDelete}
                 onNavigateToDate={(date) => jumpToDate(date)}
                 onClosePopover={() => setSelectedEventId(null)}
@@ -523,9 +615,9 @@ export function TempoCalendar() {
        {tourOpen && (
          <OnboardingTour
            onClose={handleTutorialClose}
-           onPrepareStep={(step) => {
-             if (step.prepare === "expand-assistant") openAssistantForTour();
-           }}
+           onPrepareStep={prepareTutorialStep}
+           onStepChange={handleTutorialStepChange}
+           onRequestExampleEvent={requestTutorialEvent}
          />
        )}
        {showCompletionToast && (

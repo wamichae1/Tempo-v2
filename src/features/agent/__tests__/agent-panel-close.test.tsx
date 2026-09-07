@@ -8,7 +8,19 @@ vi.mock("@/features/agent/agent-chat", () => ({
   AgentChat: () => <div data-testid="agent-chat" />,
 }));
 vi.mock("@/features/agent/webmcp-inspector", () => ({
-  WebMcpInspector: () => <div data-testid="webmcp-inspector" />,
+  WebMcpInspector: ({
+    onOpenWebMcpGuide,
+  }: {
+    onOpenWebMcpGuide?: () => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="webmcp-inspector"
+      onClick={onOpenWebMcpGuide}
+    >
+      WebMCP inspector
+    </button>
+  ),
 }));
 vi.mock("@/features/agent/use-agent-chat", () => ({
   useAgentChat: () => ({}),
@@ -24,10 +36,17 @@ describe("AgentPanel close button", () => {
   let container: HTMLDivElement;
   let root: Root;
 
-  const render = async (onClose?: () => void): Promise<void> => {
+  const render = async (
+    onClose?: () => void,
+    onOpenWebMcpGuide?: () => void,
+  ): Promise<void> => {
     await act(async () => {
       root.render(
-        <AgentPanel agent={{ supported: false } as AgentToolsState} onClose={onClose} />,
+        <AgentPanel
+          agent={{ supported: false } as AgentToolsState}
+          onClose={onClose}
+          onOpenWebMcpGuide={onOpenWebMcpGuide}
+        />,
       );
     });
   };
@@ -64,5 +83,17 @@ describe("AgentPanel close button", () => {
       close.click();
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("threads the WebMCP Guide callback to the inspector", async () => {
+    const onOpenWebMcpGuide = vi.fn();
+    await render(undefined, onOpenWebMcpGuide);
+
+    const inspector = container.querySelector(
+      '[data-testid="webmcp-inspector"]',
+    ) as HTMLButtonElement;
+    await act(async () => inspector.click());
+
+    expect(onOpenWebMcpGuide).toHaveBeenCalledOnce();
   });
 });

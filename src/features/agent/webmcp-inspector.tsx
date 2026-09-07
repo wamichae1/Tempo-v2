@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import {
   getAgentToolMetadata,
   type AgentToolInfo,
@@ -120,7 +121,13 @@ function ToolRow({
  * Read-only inspector for the WebMCP tools Tempo exposes to external agents.
  * Tool registration and execution live independently in useAgentTools.
  */
-export function WebMcpInspector({ agent }: { agent: AgentToolsState }) {
+export function WebMcpInspector({
+  agent,
+  onOpenWebMcpGuide,
+}: {
+  agent: AgentToolsState;
+  onOpenWebMcpGuide?: () => void;
+}) {
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const tools = getAgentToolMetadata();
 
@@ -151,10 +158,23 @@ export function WebMcpInspector({ agent }: { agent: AgentToolsState }) {
             </label>
           </>
         ) : (
-          <p className="text-muted-foreground mt-1 text-[11px] leading-snug">
-            Tempo Agent tools are available when Tempo is opened in a
-            compatible agent/browser environment.
-          </p>
+          <>
+            <p className="text-muted-foreground mt-1 text-[11px] leading-snug">
+              Tempo Agent tools are available when Tempo is opened in a
+              compatible agent/browser environment.
+            </p>
+            {onOpenWebMcpGuide && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={onOpenWebMcpGuide}
+              >
+                WebMCP Guide
+              </Button>
+            )}
+          </>
         )}
       </div>
 

@@ -383,6 +383,7 @@ export function CalendarEventItem({
     return (
       <div
         tabIndex={-1}
+        data-tour="event-item"
         className={cn(
           "absolute rounded-sm px-2 py-1",
           "pointer-events-none cursor-grabbing",
@@ -821,6 +822,7 @@ export function AllDayEventItem({
   if (dragVariant === "dragging") {
     return (
       <div
+        data-tour="event-item"
         className={cn(
           "h-6 px-2 py-0.5 pointer-events-none cursor-grabbing",
           "overflow-hidden select-none flex items-center gap-1",
@@ -926,6 +928,7 @@ export function AllDayEventItem({
     <div
       role="button"
       tabIndex={0}
+      data-tour="event-item"
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}

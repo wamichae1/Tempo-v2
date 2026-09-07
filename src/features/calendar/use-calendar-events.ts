@@ -30,13 +30,16 @@ interface SerializedEvent extends Omit<CalendarEvent, "start" | "end" | "occurre
 }
 
 function serializeEvents(events: CalendarEvent[]): string {
-  const serializable: SerializedEvent[] = events.map((e) => ({
-    ...e,
-    baseId: undefined,
-    occurrenceStart: undefined,
-    start: e.start.toISOString(),
-    end: e.end.toISOString(),
-  }));
+  const serializable: SerializedEvent[] = events
+    .filter((event) => !event.tutorialOnly)
+    .map((e) => ({
+      ...e,
+      baseId: undefined,
+      occurrenceStart: undefined,
+      tutorialOnly: undefined,
+      start: e.start.toISOString(),
+      end: e.end.toISOString(),
+    }));
   return JSON.stringify(serializable);
 }
 
@@ -45,7 +48,14 @@ function deserializeEvents(json: string): CalendarEvent[] {
     const parsed = JSON.parse(json) as SerializedEvent[];
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((e) => e && typeof e.id === "string" && e.start && e.end)
+      .filter(
+        (e) =>
+          e &&
+          typeof e.id === "string" &&
+          e.start &&
+          e.end &&
+          !e.tutorialOnly,
+      )
       .map((e) => ({
         ...e,
         start: new Date(e.start),
@@ -210,6 +220,7 @@ export function useCalendarEvents(): CalendarEventsStore {
 
   const addEvent = useCallback(
     (event: CalendarEvent) => {
+      if (event.tutorialOnly) return;
       commit((prev) => ({ ...prev, events: [...prev.events, event] }));
     },
     [commit],
@@ -217,6 +228,7 @@ export function useCalendarEvents(): CalendarEventsStore {
 
   const updateEvent = useCallback(
     (event: CalendarEvent) => {
+      if (event.tutorialOnly) return;
       commit((prev) => {
         // Map occurrence edits back onto the series master.
         const baseId = event.baseId ?? event.id;
@@ -236,6 +248,7 @@ export function useCalendarEvents(): CalendarEventsStore {
 
   const deleteEvent = useCallback(
     (event: CalendarEvent | string) => {
+      if (typeof event !== "string" && event.tutorialOnly) return;
       const id =
         typeof event === "string" ? event : (event.baseId ?? event.id);
       commit((prev) => ({
@@ -248,6 +261,7 @@ export function useCalendarEvents(): CalendarEventsStore {
 
   const duplicateEvent = useCallback(
     (event: CalendarEvent): CalendarEvent => {
+      if (event.tutorialOnly) return event;
       const { baseId: _b, occurrenceStart: _o, ...rest } = event;
       const copy: CalendarEvent = {
         ...rest,
@@ -262,6 +276,7 @@ export function useCalendarEvents(): CalendarEventsStore {
   );
 
   const copyEvent = useCallback((event: CalendarEvent) => {
+    if (event.tutorialOnly) return;
     const { baseId: _b, occurrenceStart: _o, id: _id, ...rest } = event;
     setClipboard({
       event: {
@@ -336,11 +351,13 @@ export function useCalendarEvents(): CalendarEventsStore {
 
   const importEvents = useCallback(
     (newEvents: CalendarEvent[], calendarId: string) => {
+      const persistentEvents = newEvents.filter((event) => !event.tutorialOnly);
+      if (persistentEvents.length === 0) return;
       commit((prev) => ({
         ...prev,
         events: [
           ...prev.events,
-          ...newEvents.map((e) => ({ ...e, calendarId })),
+          ...persistentEvents.map((e) => ({ ...e, calendarId })),
         ],
       }));
     },

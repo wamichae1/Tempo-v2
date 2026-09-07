@@ -92,6 +92,11 @@ export interface CalendarEvent {
   visibility?: "default" | "public" | "private";
   /** Calendar account email for display */
   calendarEmail?: string;
+  /**
+   * Internal marker for ephemeral onboarding events. Tutorial-only events are
+   * rendered by the calendar but must never enter persistence or history.
+   */
+  tutorialOnly?: true;
 }
 
 /**
