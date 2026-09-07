@@ -33,6 +33,11 @@ import { useAgentTools } from "@/features/agent/use-agent-tools";
 import { AgentConfirmDialog } from "@/features/agent/agent-confirm-dialog";
 import { IntroOverlay } from "@/features/intro/intro-overlay";
 import { useIntro } from "@/features/intro/use-intro";
+import { useOnboarding } from "@/features/onboarding/use-onboarding";
+import { OnboardingTour } from "@/features/onboarding/onboarding-tour";
+import { OnboardingToast } from "@/features/onboarding/onboarding-toast";
+import { WebMcpGuide } from "@/features/onboarding/webmcp-guide";
+import type { TutorialCloseReason } from "@/features/onboarding/use-onboarding";
 import { useTheme } from "@/hooks/use-theme";
 import { expandEvents } from "@/lib/recurrence";
 import { findConflictingEventIds } from "@/lib/conflicts";
@@ -82,6 +87,15 @@ export function TempoCalendar() {
   const { theme, cycleTheme } = useTheme();
   const { introOpen, dismissIntro, reopenIntro } = useIntro();
   const {
+    tourOpen,
+    guideOpen,
+    startTutorial,
+    maybeAutoStartTutorial,
+    closeTutorial,
+    openGuide,
+    closeGuide,
+  } = useOnboarding();
+  const {
     events,
     calendars,
     addEvent,
@@ -107,6 +121,12 @@ export function TempoCalendar() {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [highlightedDate, setHighlightedDate] = useState<Date | null>(null);
   const [panels, setPanels] = useState<PanelState>(loadPanelState);
+  const [assistantRequest, setAssistantRequest] = useState({
+    chatMode: 0,
+    openSettings: 0,
+  });
+  const [highlightHelp, setHighlightHelp] = useState(false);
+  const [showCompletionToast, setShowCompletionToast] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(LS_VIEW, view);
@@ -129,14 +149,36 @@ export function TempoCalendar() {
     [],
   );
 
+  const openAssistantForTour = useCallback(() => {
+    setPanels((p) => ({ ...p, assistant: true, sidebar: p.sidebar }));
+    setAssistantRequest((r) => ({
+      ...r,
+      chatMode: r.chatMode + 1,
+    }));
+  }, []);
+
+  // Auto-start the tempo tutorial once per first launch, right after the
+  // intro/landing overlay is dismissed (unless the user opted out).
+  useEffect(() => {
+    if (!introOpen) maybeAutoStartTutorial();
+  }, [introOpen, maybeAutoStartTutorial]);
+
+  const handleTutorialClose = (reason: TutorialCloseReason) => {
+    if (reason === "complete" || reason === "skip-all") {
+      setHighlightHelp(true);
+      setShowCompletionToast(true);
+    }
+    closeTutorial(reason);
+  };
+
   /**
-   * Switch views, re-anchoring the date so the target view shows the bulk of
-   * what was on screen (e.g. a week that straddles a month boundary maps to
-   * the month containing most of its days).
-   */
-  const switchView = useCallback(
-    (next: MainView) => {
-      if (next === view) return;
+  * Switch views, re-anchoring the date so the target view shows the bulk of
+  * what was on screen (e.g. a week that straddles a month boundary maps to
+  * the month containing most of its days).
+  */
+ const switchView = useCallback(
+   (next: MainView) => {
+     if (next === view) return;
       if (next === "month") {
         setCurrentDate((d) => startOfMonth(addDays(d, 3)));
       } else {
@@ -384,10 +426,13 @@ export function TempoCalendar() {
           onSelectSearchResult={(event) => jumpToDate(event.start, event.id)}
           theme={theme}
           onCycleTheme={cycleTheme}
-          onToggleSidebar={toggleSidebar}
-          onToggleAssistant={toggleAssistant}
-          onShowIntro={reopenIntro}
-        />
+         onToggleSidebar={toggleSidebar}
+         onToggleAssistant={toggleAssistant}
+         onShowIntro={reopenIntro}
+         onStartTutorial={startTutorial}
+         onOpenWebMcpGuide={openGuide}
+         highlightHelp={highlightHelp}
+       />
         <WorkspaceLayout
           sidebarCollapsed={!panels.sidebar}
           assistantCollapsed={!panels.assistant}
@@ -420,9 +465,16 @@ export function TempoCalendar() {
               }
             />
           }
-          assistant={<AgentPanel agent={agent} onClose={toggleAssistant} />}
+          assistant={
+            <AgentPanel
+              agent={agent}
+              onClose={toggleAssistant}
+              chatModeRequest={assistantRequest.chatMode}
+              openSettingsRequest={assistantRequest.openSettings}
+            />
+          }
         >
-          <div className="min-h-0 min-w-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1" data-tour="calendar">
             {view === "week" ? (
               <WeekView
                 view="week"
@@ -458,11 +510,41 @@ export function TempoCalendar() {
             )}
           </div>
         </WorkspaceLayout>
-        {agent.pendingConfirmation && (
-          <AgentConfirmDialog confirmation={agent.pendingConfirmation} />
+       {agent.pendingConfirmation && (
+         <AgentConfirmDialog confirmation={agent.pendingConfirmation} />
+       )}
+        {introOpen && (
+          <IntroOverlay
+            onDismiss={dismissIntro}
+            onStartTutorial={startTutorial}
+            onOpenWebMcpGuide={openGuide}
+          />
         )}
-        {introOpen && <IntroOverlay onDismiss={dismissIntro} />}
-      </main>
+       {tourOpen && (
+         <OnboardingTour
+           onClose={handleTutorialClose}
+           onPrepareStep={(step) => {
+             if (step.prepare === "expand-assistant") openAssistantForTour();
+           }}
+         />
+       )}
+       {showCompletionToast && (
+         <OnboardingToast
+           title="Tutorial complete"
+           body="You can revisit it anytime from the ? icon."
+           onDone={() => setShowCompletionToast(false)}
+         />
+       )}
+       <WebMcpGuide
+         open={guideOpen}
+         onClose={closeGuide}
+         onOpenAiSettings={() => {
+           openAssistantForTour();
+           setAssistantRequest((r) => ({ ...r, openSettings: r.openSettings + 1 }));
+           setHighlightHelp(false);
+         }}
+       />
+     </main>
     </CalendarDataProvider>
   );
 }

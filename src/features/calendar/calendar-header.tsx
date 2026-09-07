@@ -25,6 +25,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SearchPopover } from "@/features/calendar/search-popover";
@@ -62,6 +64,10 @@ export interface CalendarHeaderProps {
   onToggleSidebar: () => void;
   onToggleAssistant: () => void;
   onShowIntro: () => void;
+  onStartTutorial: () => void;
+  onOpenWebMcpGuide: () => void;
+  /** Briefly emphasize the help button (after tutorial completion). */
+  highlightHelp?: boolean;
 }
 
 /**
@@ -96,6 +102,9 @@ export function CalendarHeader({
   onToggleSidebar,
   onToggleAssistant,
   onShowIntro,
+  onStartTutorial,
+  onOpenWebMcpGuide,
+  highlightHelp = false,
 }: CalendarHeaderProps) {
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
@@ -150,6 +159,7 @@ export function CalendarHeader({
           onClick={onToggleAssistant}
           title="Tempo Agent (Ctrl+J)"
           aria-label="Tempo Agent"
+          data-tour="agent-toggle"
         >
           <Bot className="size-4" />
         </Button>
@@ -194,20 +204,51 @@ export function CalendarHeader({
             <Sun className="size-4" />
           )}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          onClick={onShowIntro}
-          title="Show introduction"
-          aria-label="Show introduction"
-        >
-          <CircleHelp className="size-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={
+                highlightHelp
+                  ? "ring-ring size-8 animate-pulse ring-2"
+                  : "size-8"
+              }
+              title="Help & guides"
+              aria-label="Help & guides"
+            >
+              <CircleHelp className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>Help &amp; Guides</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onStartTutorial}>
+              <div className="flex flex-col gap-0.5">
+                <span>Tempo Tutorial</span>
+                <span className="text-muted-foreground text-[11px]">
+                  Learn the basics of Tempo
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onOpenWebMcpGuide}>
+              <div className="flex flex-col gap-0.5">
+                <span>WebMCP Guide</span>
+                <span className="text-muted-foreground text-[11px]">
+                  Set up Tempo with AI agents
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onShowIntro}>
+              Welcome screen
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="bg-border mx-1.5 h-4 w-px" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" data-tour="view-switcher">
               {view === "week" ? "Week" : "Month"}
               <ChevronDown className="size-3.5" />
             </Button>
@@ -221,7 +262,12 @@ export function CalendarHeader({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="default" size="sm" onClick={onCreateEvent}>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={onCreateEvent}
+          data-tour="new-event"
+        >
           <Plus className="size-4" />
           New event
         </Button>

@@ -29,9 +29,15 @@ function loadMode(): AgentPanelMode {
 export function AgentPanel({
   agent,
   onClose,
+  chatModeRequest,
+  openSettingsRequest,
 }: {
   agent: AgentToolsState;
   onClose?: () => void;
+  /** When this nonce changes, switch to the Chat tab. */
+  chatModeRequest?: number;
+  /** When this nonce changes, open the Agent settings dialog. */
+  openSettingsRequest?: number;
 }) {
   const [mode, setMode] = useState<AgentPanelMode>(loadMode);
   const settings = useAiSettings();
@@ -54,8 +60,19 @@ export function AgentPanel({
     });
   };
 
+  const lastChatModeRequest = useRef(chatModeRequest ?? 0);
+  useEffect(() => {
+    if ((chatModeRequest ?? 0) !== lastChatModeRequest.current) {
+      lastChatModeRequest.current = chatModeRequest ?? 0;
+      setMode("chat");
+    }
+  }, [chatModeRequest]);
+
   return (
-    <div className="bg-background flex h-full min-h-0 flex-col">
+    <div
+      className="bg-background flex h-full min-h-0 flex-col"
+      data-tour="agent-panel"
+    >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <Sparkles className="text-muted-foreground size-3.5" />
         <span className="text-xs font-semibold">Tempo Agent</span>
@@ -146,6 +163,7 @@ export function AgentPanel({
           settings={settings}
           confirmationsEnabled={agent.confirmationsEnabled}
           onConfirmationsEnabledChange={agent.setConfirmationsEnabled}
+          openSettingsRequest={openSettingsRequest}
         />
       </div>
       <div

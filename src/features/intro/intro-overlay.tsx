@@ -6,6 +6,8 @@ import { CursorCalendarReveal } from "@/features/intro/cursor-calendar-reveal";
 
 export interface IntroOverlayProps {
   onDismiss: () => void;
+  onStartTutorial?: () => void;
+  onOpenWebMcpGuide?: () => void;
 }
 
 /** Base-aware public asset URL (respects Vite `base` for GitHub Pages). */
@@ -18,7 +20,11 @@ const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`;
  * calendar workspace underneath is untouched. Mounted conditionally by the
  * parent; plays a short exit fade before calling onDismiss.
  */
-export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
+export function IntroOverlay({
+  onDismiss,
+  onStartTutorial,
+  onOpenWebMcpGuide,
+}: IntroOverlayProps) {
   const [entered, setEntered] = useState(false);
   const [closing, setClosing] = useState(false);
   const continueRef = useRef<HTMLButtonElement>(null);
@@ -119,6 +125,44 @@ export function IntroOverlay({ onDismiss }: IntroOverlayProps) {
               Enter Tempo
               <ArrowRight className="size-4" />
             </Button>
+
+            <div className="mt-8 border-t pt-6">
+              <p className="text-muted-foreground font-mono text-[11px] tracking-wider uppercase">
+                Get Started &amp; Guides
+              </p>
+              <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestDismiss();
+                    onStartTutorial?.();
+                  }}
+                  className="bg-secondary/50 hover:bg-secondary flex-1 rounded-md border p-3 text-left transition-colors"
+                >
+                  <p className="text-foreground text-xs font-semibold">
+                    Learn Tempo
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                    Learn how to use the calendar and Tempo Agent.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestDismiss();
+                    onOpenWebMcpGuide?.();
+                  }}
+                  className="bg-secondary/50 hover:bg-secondary flex-1 rounded-md border p-3 text-left transition-colors"
+                >
+                  <p className="text-foreground text-xs font-semibold">
+                    Set Up WebMCP
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                    Connect Tempo to compatible AI agents.
+                  </p>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Right: interactive reveal */}

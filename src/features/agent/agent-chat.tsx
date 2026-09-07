@@ -107,11 +107,14 @@ export function AgentChat({
   settings,
   confirmationsEnabled,
   onConfirmationsEnabledChange,
+  openSettingsRequest,
 }: {
   chat: AgentChatState;
   settings: AiSettingsState;
   confirmationsEnabled: boolean;
   onConfirmationsEnabledChange: (enabled: boolean) => void;
+  /** When this nonce changes, open the Agent settings dialog. */
+  openSettingsRequest?: number;
 }) {
   const [clearOpen, setClearOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -156,6 +159,14 @@ export function AgentChat({
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [chat.draft]);
 
+  const lastOpenSettingsRequest = useRef(openSettingsRequest ?? 0);
+  useEffect(() => {
+    if ((openSettingsRequest ?? 0) !== lastOpenSettingsRequest.current) {
+      lastOpenSettingsRequest.current = openSettingsRequest ?? 0;
+      setSettingsOpen(true);
+    }
+  }, [openSettingsRequest]);
+
   const submit = () => {
     if (!chat.configured) {
       setSettingsOpen(true);
@@ -183,6 +194,7 @@ export function AgentChat({
           onClick={() => setSettingsOpen(true)}
           aria-label="Tempo Agent settings"
           title="Tempo Agent settings"
+          data-tour="agent-settings"
         >
           <Settings className="size-3" />
         </Button>

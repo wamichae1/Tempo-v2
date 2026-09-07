@@ -19,6 +19,7 @@ import type {
 } from "./week-view-types";
 import { EventContextMenu } from "./event-context-menu";
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const eventColorStyles: Record<
   EventColor,
   {
@@ -497,6 +498,7 @@ export function CalendarEventItem({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
+      data-tour="event-item"
       className={cn(
         "absolute px-2 py-1",
         hasTopRounding && "rounded-t-md",
