@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 
 import { AgentChat } from "@/features/agent/agent-chat";
 import { useAgentChat } from "@/features/agent/use-agent-chat";
@@ -26,7 +26,13 @@ function loadMode(): AgentPanelMode {
  * Home for Tempo's built-in agent experience and its existing WebMCP
  * inspector. Switching views never affects WebMCP registration or execution.
  */
-export function AgentPanel({ agent }: { agent: AgentToolsState }) {
+export function AgentPanel({
+  agent,
+  onClose,
+}: {
+  agent: AgentToolsState;
+  onClose?: () => void;
+}) {
   const [mode, setMode] = useState<AgentPanelMode>(loadMode);
   const settings = useAiSettings();
   const chat = useAgentChat({ tools: agent.tools, settings });
@@ -53,6 +59,15 @@ export function AgentPanel({ agent }: { agent: AgentToolsState }) {
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <Sparkles className="text-muted-foreground size-3.5" />
         <span className="text-xs font-semibold">Tempo Agent</span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close Tempo Agent"
+          aria-label="Close Tempo Agent"
+          className="hover:bg-accent text-muted-foreground hover:text-foreground ml-auto flex size-6 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+        >
+          <X className="size-3.5" />
+        </button>
       </div>
 
       <div

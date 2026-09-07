@@ -420,7 +420,7 @@ export function TempoCalendar() {
               }
             />
           }
-          assistant={<AgentPanel agent={agent} />}
+          assistant={<AgentPanel agent={agent} onClose={toggleAssistant} />}
         >
           <div className="min-h-0 min-w-0 flex-1">
             {view === "week" ? (
