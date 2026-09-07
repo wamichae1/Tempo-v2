@@ -112,8 +112,8 @@ export function AgentSettingsDialog({
         onClose={close}
         title="Tempo Agent settings"
         description="Choose an AI provider and manage browser-direct API keys."
-        widthClass="w-[min(760px,calc(100vw-2rem))]"
-        className="max-h-[calc(100vh-2rem)] overflow-y-auto"
+        widthClass="w-[min(620px,calc(100vw-2rem))]"
+        className="scrollbar-thin max-h-[calc(100vh-2rem)] overflow-y-auto"
       >
         <div className="mt-4 flex min-h-96 gap-4 max-sm:flex-col">
           <div
@@ -238,8 +238,6 @@ export function AgentSettingsDialog({
                 aria-label="API key settings"
                 className="flex flex-col gap-3"
               >
-              <div className="flex gap-3 max-sm:flex-col">
-                <div className="flex min-w-0 flex-1 flex-col gap-3">
                 <div className="flex items-center gap-2">
                   <KeyRound className="text-muted-foreground size-4" />
                   <div>
@@ -602,9 +600,7 @@ export function AgentSettingsDialog({
                     );
                   })}
                 </div>
-                </div>
 
-                <div className="flex w-52 shrink-0 flex-col gap-3 max-sm:w-full">
                 <div className="bg-secondary/50 text-muted-foreground rounded-md border px-2.5 py-2 text-[10px] leading-relaxed">
                   Requests and model discovery go directly from this browser to
                   the selected provider. Tempo has no backend and never receives
@@ -633,8 +629,6 @@ export function AgentSettingsDialog({
                     </Button>
                   </div>
                 </div>
-                </div>
-              </div>
               </div>
             )}
           </div>
