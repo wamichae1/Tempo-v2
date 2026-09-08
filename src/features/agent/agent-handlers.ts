@@ -1,4 +1,5 @@
 import type { CalendarEvent, EventColor } from "@/components/calendar";
+import { addDays, startOfDay } from "date-fns";
 import type { AgentTool } from "@/features/agent/agent-tool";
 import {
   createEventId,
@@ -6,6 +7,13 @@ import {
 } from "@/features/calendar/use-calendar-events";
 import { EVENT_COLORS } from "@/features/calendar/types";
 import { findConflictingEventIds } from "@/lib/conflicts";
+import {
+  findFreeTime,
+  planEventPush,
+  resolvePushAnchor,
+  type FreeTimeOptions,
+  type PushPlan,
+} from "@/lib/calendar-scheduling";
 import {
   describeRecurrence,
   expandEvents,
@@ -80,6 +88,136 @@ function parseColor(value: unknown): EventColor | null | undefined {
   return EVENT_COLORS.includes(value as EventColor)
     ? (value as EventColor)
     : null;
+}
+
+function parseInteger(value: unknown, minimum: number): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= minimum
+    ? value
+    : null;
+}
+
+function parseLocalTime(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function parseCalendarIds(
+  value: unknown,
+  store: CalendarEventsStore,
+): string[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((id) => typeof id !== "string" || id.length === 0)
+  ) {
+    return null;
+  }
+  const ids = [...new Set(value as string[])];
+  return ids.every((id) => store.calendars.some((calendar) => calendar.id === id))
+    ? ids
+    : null;
+}
+
+function parseFreeTimeOptions(
+  input: Input,
+  store: CalendarEventsStore,
+  calendarField: "calendarIds" | "busyCalendarIds",
+): FreeTimeOptions | string {
+  const rangeStart = parseDate(input.rangeStart);
+  const rangeEnd = parseDate(input.rangeEnd);
+  if (!rangeStart || !rangeEnd) {
+    return "rangeStart and rangeEnd must be ISO date-times";
+  }
+  if (rangeEnd <= rangeStart) return "rangeEnd must be after rangeStart";
+  const durationMinutes = parseInteger(input.durationMinutes, 1);
+  if (durationMinutes === null) {
+    return "durationMinutes must be a positive integer";
+  }
+  const calendarIds = parseCalendarIds(input[calendarField], store);
+  if (calendarIds === null) return `${calendarField} contains an unknown calendar`;
+  const preferredStartMinutes = parseLocalTime(input.preferredStartTime);
+  const preferredEndMinutes = parseLocalTime(input.preferredEndTime);
+  if (preferredStartMinutes === null || preferredEndMinutes === null) {
+    return "preferred times must use HH:mm";
+  }
+  if ((preferredStartMinutes === undefined) !== (preferredEndMinutes === undefined)) {
+    return "preferredStartTime and preferredEndTime must be provided together";
+  }
+  if (
+    preferredStartMinutes !== undefined &&
+    preferredEndMinutes !== undefined &&
+    preferredEndMinutes <= preferredStartMinutes
+  ) {
+    return "preferredEndTime must be after preferredStartTime";
+  }
+  return {
+    rangeStart,
+    rangeEnd,
+    durationMinutes,
+    calendarIds,
+    preferredStartMinutes,
+    preferredEndMinutes,
+  };
+}
+
+function resolveCalendarId(
+  store: CalendarEventsStore,
+  value: unknown,
+): string | null {
+  if (typeof value === "string") {
+    return store.calendars.some((calendar) => calendar.id === value)
+      ? value
+      : null;
+  }
+  return (
+    (store.calendars.find((calendar) => calendar.visible) ?? store.calendars[0])
+      ?.id ??
+    null
+  );
+}
+
+function createEvent(
+  store: CalendarEventsStore,
+  details: {
+    title: string;
+    start: Date;
+    end: Date;
+    calendarId: string;
+    description?: string;
+    location?: string;
+    isAllDay?: boolean;
+    recurrence?: RecurrenceRule;
+  },
+): CalendarEvent {
+  const event: CalendarEvent = {
+    id: createEventId(),
+    title: details.title,
+    start: details.start,
+    end: details.end,
+    calendarId: details.calendarId,
+    isAllDay: details.isAllDay ?? false,
+    description: details.description,
+    location: details.location,
+    rrule: details.recurrence,
+    recurrence: details.recurrence
+      ? describeRecurrence(details.recurrence, details.start)
+      : undefined,
+  };
+  store.addEvent(event);
+  return event;
+}
+
+function serializeWindow(window: { start: Date; end: Date; availableMinutes: number }) {
+  return {
+    start: window.start.toISOString(),
+    end: window.end.toISOString(),
+    availableMinutes: window.availableMinutes,
+  };
 }
 
 /** Resolve a base event from an id that may be an expanded occurrence id. */
@@ -188,6 +326,182 @@ export function buildAgentTools(ctx: AgentToolContext): AgentTool[] {
       },
     },
     {
+      name: "tempo_find_free_time",
+      title: "Find free time",
+      description:
+        "Find maximal conflict-free windows in a date range for a requested duration. Recurring and busy all-day events are considered; events marked free are ignored.",
+      inputSchema: TOOL_SCHEMAS.tempo_find_free_time,
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: async (input: Input) => {
+        const parsed = parseFreeTimeOptions(input, store, "calendarIds");
+        if (typeof parsed === "string") return err(parsed);
+        const windows = findFreeTime(store.events, parsed);
+        return ok({
+          durationMinutes: parsed.durationMinutes,
+          calendarsConsidered:
+            parsed.calendarIds ?? store.calendars.map((calendar) => calendar.id),
+          windows: windows.map(serializeWindow),
+        });
+      },
+    },
+    {
+      name: "tempo_push_events",
+      title: "Push subsequent events",
+      description:
+        "Shift timed events after an anchor by a signed minute offset, preserving duration. Defaults to the anchor calendar and same local day. Recurring candidates move as whole series. Requires confirmation and rejects conflicts atomically.",
+      inputSchema: TOOL_SCHEMAS.tempo_push_events,
+      annotations: { untrustedContentHint: true },
+      execute: async (input: Input, options) => {
+        if (typeof input.anchorEventId !== "string" || !input.anchorEventId) {
+          return err("anchorEventId is required");
+        }
+        const offsetMinutes = parseInteger(Math.abs(Number(input.offsetMinutes)), 1);
+        if (
+          offsetMinutes === null ||
+          typeof input.offsetMinutes !== "number" ||
+          !Number.isSafeInteger(input.offsetMinutes) ||
+          input.offsetMinutes === 0
+        ) {
+          return err("offsetMinutes must be a non-zero integer");
+        }
+        const signedOffset = input.offsetMinutes;
+        const scope = input.scope ?? "same_day";
+        if (scope !== "same_day" && scope !== "date_range") {
+          return err('scope must be "same_day" or "date_range"');
+        }
+        const calendarIds = parseCalendarIds(input.calendarIds, store);
+        if (calendarIds === null) return err("calendarIds contains an unknown calendar");
+
+        const makePlan = (): PushPlan | string => {
+          const anchor = resolvePushAnchor(store.events, input.anchorEventId as string);
+          if (anchor === "recurring-occurrence-required") {
+            return "a recurring anchor requires an exact occurrence id";
+          }
+          if (!anchor) return "anchor event not found";
+
+          let scopeStart = anchor.occurrence.end;
+          let scopeEnd: Date;
+          if (scope === "same_day") {
+            scopeEnd = addDays(startOfDay(anchor.occurrence.start), 1);
+          } else {
+            const rangeStart = parseDate(input.rangeStart);
+            const rangeEnd = parseDate(input.rangeEnd);
+            if (!rangeStart || !rangeEnd) {
+              return "date_range requires ISO rangeStart and rangeEnd";
+            }
+            if (rangeEnd <= rangeStart) return "rangeEnd must be after rangeStart";
+            if (rangeStart > scopeStart) scopeStart = rangeStart;
+            scopeEnd = rangeEnd;
+          }
+          if (scopeEnd <= scopeStart) return "push scope ends before the anchor";
+          return planEventPush(store.events, {
+            anchor,
+            offsetMinutes: signedOffset,
+            scopeStart,
+            scopeEnd,
+            calendarIds,
+          });
+        };
+
+        const initial = makePlan();
+        if (typeof initial === "string") return err(initial);
+        const serializeConflicts = (plan: PushPlan) =>
+          plan.conflicts.map(({ first, second }) => ({
+            shifted: serializeEvent(
+              plan.updates.some((event) => event.id === (first.baseId ?? first.id))
+                ? first
+                : second,
+              store.calendars,
+            ),
+            existing: serializeEvent(
+              plan.updates.some((event) => event.id === (first.baseId ?? first.id))
+                ? second
+                : first,
+              store.calendars,
+            ),
+          }));
+        if (initial.conflicts.length > 0) {
+          return {
+            ok: false as const,
+            error: "push would create conflicts",
+            conflicts: serializeConflicts(initial),
+          };
+        }
+        if (initial.updates.length === 0) {
+          return ok({
+            anchor: serializeEvent(initial.anchor, store.calendars),
+            offsetMinutes: signedOffset,
+            changedCount: 0,
+            events: [],
+            wholeSeriesIds: [],
+            skippedAllDay: initial.skippedAllDay.map((event) =>
+              serializeEvent(event, store.calendars),
+            ),
+            scope: {
+              type: scope,
+              start: initial.scopeStart.toISOString(),
+              end: initial.scopeEnd.toISOString(),
+              calendarIds:
+                calendarIds ?? [initial.anchor.calendarId].filter(Boolean),
+            },
+            conflictCheckRange: {
+              start: initial.conflictCheckStart.toISOString(),
+              end: initial.conflictCheckEnd.toISOString(),
+            },
+          });
+        }
+
+        const approved = await confirm(
+          {
+            title: "Push calendar events",
+            body: `Move ${initial.updates.length} event${initial.updates.length === 1 ? "" : "s"} ${Math.abs(signedOffset)} minutes ${signedOffset > 0 ? "later" : "earlier"}?${initial.wholeSeriesIds.length > 0 ? ` ${initial.wholeSeriesIds.length} recurring series will move in full.` : ""}`,
+            confirmLabel: "Push events",
+          },
+          options.signal,
+        );
+        if (!approved) return err("user declined the push");
+
+        const revalidated = makePlan();
+        if (typeof revalidated === "string") {
+          return err("calendar changed while awaiting confirmation; retry the push");
+        }
+        if (revalidated.fingerprint !== initial.fingerprint) {
+          return err("calendar changed while awaiting confirmation; retry the push");
+        }
+        if (revalidated.conflicts.length > 0) {
+          return {
+            ok: false as const,
+            error: "calendar changed and the push would create conflicts",
+            conflicts: serializeConflicts(revalidated),
+          };
+        }
+        store.updateEvents(revalidated.updates);
+        return ok({
+          anchor: serializeEvent(revalidated.anchor, store.calendars),
+          offsetMinutes: signedOffset,
+          changedCount: revalidated.updates.length,
+          events: revalidated.updates.map((event) =>
+            serializeEvent(event, store.calendars),
+          ),
+          wholeSeriesIds: revalidated.wholeSeriesIds,
+          skippedAllDay: revalidated.skippedAllDay.map((event) =>
+            serializeEvent(event, store.calendars),
+          ),
+          scope: {
+            type: scope,
+            start: revalidated.scopeStart.toISOString(),
+            end: revalidated.scopeEnd.toISOString(),
+            calendarIds:
+              calendarIds ?? [revalidated.anchor.calendarId].filter(Boolean),
+          },
+          conflictCheckRange: {
+            start: revalidated.conflictCheckStart.toISOString(),
+            end: revalidated.conflictCheckEnd.toISOString(),
+          },
+        });
+      },
+    },
+    {
       name: "tempo_create_event",
       title: "Create event",
       description:
@@ -202,20 +516,16 @@ export function buildAgentTools(ctx: AgentToolContext): AgentTool[] {
         if (!start || !end) return err("start and end must be ISO date-times");
         if (end <= start) return err("end must be after start");
 
-        let calendarId =
-          typeof input.calendarId === "string" ? input.calendarId : undefined;
-        if (calendarId && !store.calendars.some((c) => c.id === calendarId)) {
-          return err(`unknown calendarId "${calendarId}"`);
+        const calendarId = resolveCalendarId(store, input.calendarId);
+        if (typeof input.calendarId === "string" && !calendarId) {
+          return err(`unknown calendarId "${input.calendarId}"`);
         }
-        calendarId ??=
-          (store.calendars.find((c) => c.visible) ?? store.calendars[0])?.id;
         if (!calendarId) return err("no calendar exists to hold the event");
 
         const recurrence = parseRecurrence(input.recurrence);
         if (recurrence === null) return err("invalid recurrence rule");
 
-        const event: CalendarEvent = {
-          id: createEventId(),
+        const event = createEvent(store, {
           title: input.title.trim(),
           start,
           end,
@@ -225,13 +535,60 @@ export function buildAgentTools(ctx: AgentToolContext): AgentTool[] {
             typeof input.description === "string" ? input.description : undefined,
           location:
             typeof input.location === "string" ? input.location : undefined,
-          rrule: recurrence ?? undefined,
-          recurrence: recurrence
-            ? describeRecurrence(recurrence, start)
-            : undefined,
-        };
-        store.addEvent(event);
+          recurrence: recurrence ?? undefined,
+        });
         return ok({ event: serializeEvent(event, store.calendars) });
+      },
+    },
+    {
+      name: "tempo_schedule_event",
+      title: "Schedule event in free time",
+      description:
+        "Find the earliest conflict-free slot matching a duration and optional local-time window, then create one non-recurring timed event without moving existing events.",
+      inputSchema: TOOL_SCHEMAS.tempo_schedule_event,
+      annotations: { untrustedContentHint: true },
+      execute: async (input: Input) => {
+        if (typeof input.title !== "string" || !input.title.trim()) {
+          return err("title is required");
+        }
+        const parsed = parseFreeTimeOptions(input, store, "busyCalendarIds");
+        if (typeof parsed === "string") return err(parsed);
+        const calendarId = resolveCalendarId(store, input.calendarId);
+        if (typeof input.calendarId === "string" && !calendarId) {
+          return err(`unknown calendarId "${String(input.calendarId)}"`);
+        }
+        if (!calendarId) return err("no calendar exists to hold the event");
+        const window = findFreeTime(store.events, parsed)[0];
+        if (!window) {
+          return {
+            ok: false as const,
+            error: "no suitable free time found",
+            durationMinutes: parsed.durationMinutes,
+            range: {
+              start: parsed.rangeStart.toISOString(),
+              end: parsed.rangeEnd.toISOString(),
+            },
+          };
+        }
+        const start = window.start;
+        const end = new Date(start.getTime() + parsed.durationMinutes * 60_000);
+        const event = createEvent(store, {
+          title: input.title.trim(),
+          start,
+          end,
+          calendarId,
+          description:
+            typeof input.description === "string" ? input.description : undefined,
+          location:
+            typeof input.location === "string" ? input.location : undefined,
+        });
+        return ok({
+          selectedSlot: {
+            start: start.toISOString(),
+            end: end.toISOString(),
+          },
+          event: serializeEvent(event, store.calendars),
+        });
       },
     },
     {

@@ -2,6 +2,40 @@ import { areIntervalsOverlapping } from "date-fns";
 
 import type { CalendarEvent } from "@/components/calendar/week-view-types";
 
+export interface EventConflictPair {
+  first: CalendarEvent;
+  second: CalendarEvent;
+}
+
+/** Returns every pair of overlapping timed events. */
+export function findEventConflictPairs(
+  events: CalendarEvent[],
+): EventConflictPair[] {
+  const timed = events.filter((e) => !e.isAllDay);
+  const sorted = [...timed].sort(
+    (a, b) => a.start.getTime() - b.start.getTime(),
+  );
+  const pairs: EventConflictPair[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const first = sorted[i];
+    for (let j = i + 1; j < sorted.length; j++) {
+      const second = sorted[j];
+      if (second.start >= first.end) break;
+      if (
+        areIntervalsOverlapping(
+          { start: first.start, end: first.end },
+          { start: second.start, end: second.end },
+        )
+      ) {
+        pairs.push({ first, second });
+      }
+    }
+  }
+
+  return pairs;
+}
+
 /**
  * Detects overlapping timed events.
  *
@@ -15,30 +49,10 @@ import type { CalendarEvent } from "@/components/calendar/week-view-types";
 export function findConflictingEventIds(
   events: CalendarEvent[],
 ): Set<string> {
-  const timed = events.filter((e) => !e.isAllDay);
   const conflicts = new Set<string>();
-
-  // Sort by start so we can stop early once we pass an event's end.
-  const sorted = [...timed].sort(
-    (a, b) => a.start.getTime() - b.start.getTime(),
-  );
-
-  for (let i = 0; i < sorted.length; i++) {
-    const a = sorted[i];
-    for (let j = i + 1; j < sorted.length; j++) {
-      const b = sorted[j];
-      if (b.start >= a.end) break;
-      if (
-        areIntervalsOverlapping(
-          { start: a.start, end: a.end },
-          { start: b.start, end: b.end },
-        )
-      ) {
-        conflicts.add(a.id);
-        conflicts.add(b.id);
-      }
-    }
+  for (const { first, second } of findEventConflictPairs(events)) {
+    conflicts.add(first.id);
+    conflicts.add(second.id);
   }
-
   return conflicts;
 }

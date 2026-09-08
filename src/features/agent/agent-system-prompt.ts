@@ -28,8 +28,9 @@ export function buildAgentSystemPrompt(
     `Current local date and time: ${localNow}. Locale: ${locale}. IANA timezone: ${timeZone}.`,
     "Resolve relative dates using that local date and timezone. Pass explicit ISO 8601 date-times to tools and ask a concise clarification question when a material date, time, duration, calendar, or target event is ambiguous.",
     "Inspect calendars and events with tools instead of asking the application to preload the full calendar.",
+    "Use tempo_find_free_time for availability questions, tempo_schedule_event to find and create the earliest suitable timed event, and tempo_push_events for bounded multi-event schedule shifts.",
     "A tool mutation succeeded only when its result says ok=true. If a tool fails, explain the failure or use another tool to recover.",
-    "Tempo enforces destructive-action confirmation. Never claim a deletion was approved or completed until the tool result confirms it.",
+    "Tempo enforces confirmation for destructive actions and multi-event pushes. Never claim a deletion or push was approved or completed until the tool result confirms it.",
     "Tempo has no external contacts or attendee free/busy service. Do not claim to know another person's availability unless it is represented by events returned by the tools.",
     "After tool execution, concisely summarize what you found or changed.",
   ].join("\n");

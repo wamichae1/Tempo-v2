@@ -7,11 +7,12 @@ enough to exercise Tempo's tool layer end to end.
 """
 
 import json
+import os
 import sys
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:3000"
+BASE = os.environ.get("TEMPO_BASE_URL", "http://127.0.0.1:3000")
 results = []
 
 MOCK_WEBMCP = """
@@ -240,7 +241,7 @@ def main():
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(BASE, wait_until="networkidle")
-        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1'); localStorage.setItem('tempo:calendars', JSON.stringify([{id:'cal-personal',name:'Personal',color:'purple',visible:true},{id:'cal-university',name:'University',color:'green',visible:true},{id:'cal-work',name:'Work',color:'blue',visible:true}])); localStorage.setItem('tempo:events','[]')")
+        page.evaluate("localStorage.clear(); localStorage.setItem('tempo:intro-seen','1'); localStorage.setItem('tempo:tutorial-done','1'); localStorage.setItem('tempo:calendars', JSON.stringify([{id:'cal-personal',name:'Personal',color:'purple',visible:true},{id:'cal-university',name:'University',color:'green',visible:true},{id:'cal-work',name:'Work',color:'blue',visible:true}])); localStorage.setItem('tempo:events','[]')")
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(800)
 
@@ -249,12 +250,70 @@ def main():
         names = {t["name"] for t in tools}
         expected = {
             "tempo_list_calendars", "tempo_list_events", "tempo_get_event",
-            "tempo_find_conflicts", "tempo_create_event", "tempo_update_event",
+            "tempo_find_conflicts", "tempo_find_free_time", "tempo_push_events",
+            "tempo_create_event", "tempo_schedule_event", "tempo_update_event",
             "tempo_move_event", "tempo_duplicate_event", "tempo_delete_event",
             "tempo_create_calendar", "tempo_update_calendar",
             "tempo_delete_calendar", "tempo_undo", "tempo_redo",
         }
         check("tools registered", expected.issubset(names), f"{len(names)} tools: missing {expected - names}")
+
+        if os.environ.get("TEMPO_CALENDAR_TOOLS_ONLY") == "1":
+            anchor = call_tool(page, "tempo_create_event", {
+                "title": "Push Anchor", "start": "2026-09-02T09:00:00",
+                "end": "2026-09-02T10:00:00", "calendarId": "cal-personal",
+            })
+            next_event = call_tool(page, "tempo_create_event", {
+                "title": "Push Target", "start": "2026-09-02T10:00:00",
+                "end": "2026-09-02T11:00:00", "calendarId": "cal-personal",
+            })
+            free = call_tool(page, "tempo_find_free_time", {
+                "rangeStart": "2026-09-02T12:00:00",
+                "rangeEnd": "2026-09-02T14:00:00",
+                "durationMinutes": 60,
+            })
+            check("find_free_time focused", free.get("ok") and free.get("windows")
+                  and free["windows"][0]["availableMinutes"] == 120, json.dumps(free)[:200])
+            scheduled = call_tool(page, "tempo_schedule_event", {
+                "title": "Focused Schedule",
+                "rangeStart": "2026-09-02T12:00:00",
+                "rangeEnd": "2026-09-02T14:00:00",
+                "durationMinutes": 60,
+                "calendarId": "cal-personal",
+            })
+            check("schedule_event focused", scheduled.get("ok")
+                  and scheduled.get("selectedSlot", {}).get("start", "").startswith("2026-09-02"),
+                  json.dumps(scheduled)[:200])
+            page.evaluate(
+                "([n, i]) => { window.__focusedPush = document.modelContext.executeTool(n, i); }",
+                ["tempo_push_events", {
+                    "anchorEventId": anchor["event"]["id"], "offsetMinutes": 30,
+                }],
+            )
+            page.wait_for_selector("text=Move 2 events 30 minutes later")
+            page.get_by_role("button", name="Push events", exact=True).click()
+            page.wait_for_timeout(300)
+            pushed = page.evaluate("window.__focusedPush.then((r) => JSON.parse(r))")
+            check("push_events focused", pushed.get("ok") and pushed.get("changedCount") == 2,
+                  json.dumps(pushed)[:200])
+            moved = call_tool(page, "tempo_get_event", {"eventId": next_event["event"]["id"]})
+            check("push persisted focused", moved.get("ok") and "10:30" in page.evaluate(
+                "(r) => new Date(r).toTimeString()", moved["event"]["start"]))
+            undone = call_tool(page, "tempo_undo")
+            page.wait_for_timeout(300)
+            restored = call_tool(page, "tempo_get_event", {"eventId": next_event["event"]["id"]})
+            check("push single undo focused", undone.get("ok") and restored.get("ok")
+                  and "10:00" in page.evaluate(
+                      "(r) => new Date(r).toTimeString()", restored["event"]["start"]))
+            page.wait_for_timeout(300)
+            saved = page.evaluate("JSON.parse(localStorage.getItem('tempo:events'))")
+            check("high-level tools persist through store", any(
+                event["id"] == scheduled["event"]["id"] for event in saved))
+            check("no page errors", not errors, "; ".join(errors)[:200])
+            browser.close()
+            failed = [result for result in results if not result[1]]
+            print(f"\n{len(results) - len(failed)}/{len(results)} passed")
+            sys.exit(1 if failed else 0)
 
         # 2. Built-in Chat: configuration, direct provider request, shared
         # tool execution, transcript persistence, and key privacy.
@@ -311,8 +370,8 @@ def main():
         check("memory key not persisted",
               page.evaluate("localStorage.getItem('tempo:ai-key:openai:v1')") is None)
         requests = page.evaluate("globalThis.__tempoOpenAiRequests")
-        check("provider received all 14 shared tools",
-              len(requests) == 3 and len(requests[1].get("tools", [])) == 14)
+        check("provider received all 17 shared tools",
+              len(requests) == 3 and len(requests[1].get("tools", [])) == 17)
 
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(500)
@@ -427,11 +486,11 @@ def main():
         page.wait_for_timeout(200)
         create_row = page.locator("button:has-text('tempo_create_event')").first
         check("panel status available", page.locator("text=Available").count() >= 1)
-        check("panel tool count copy", page.locator("text=14 tools available").count() >= 1)
+        check("panel tool count copy", page.locator("text=17 tools available").count() >= 1)
         for section in ("READ", "WRITE", "HISTORY"):
             check(f"panel section {section}", page.locator(f"section[aria-label='{section} tools']").count() == 1)
         missing = [n for n in expected if page.locator(f"text={n}").count() == 0]
-        check("panel lists all 14 tools", not missing, f"missing: {missing}")
+        check("panel lists all 17 tools", not missing, f"missing: {missing}")
         check("panel shows descriptions", page.locator("text=Create a new calendar event").count() >= 1)
         # Expand create event -> parameter details
         create_row.click()
@@ -453,7 +512,7 @@ def main():
         ctx2 = browser.new_context(viewport={"width": 1400, "height": 900})
         page2 = ctx2.new_page()
         page2.goto(BASE, wait_until="networkidle")
-        page2.evaluate("localStorage.setItem('tempo:intro-seen','1')")
+        page2.evaluate("localStorage.setItem('tempo:intro-seen','1'); localStorage.setItem('tempo:tutorial-done','1')")
         page2.reload(wait_until="networkidle")
         page2.wait_for_timeout(500)
         page2.get_by_role("tab", name="WebMCP").click()
@@ -526,6 +585,52 @@ def main():
         check("duplicate_event", res.get("ok") and res["event"]["id"] != event_id
               and "10:00" in page.evaluate("(r) => new Date(r).toTimeString()", res["event"]["start"]))
 
+        # 10b. High-level free-time, scheduling, and atomic push tools
+        res = call_tool(page, "tempo_find_free_time", {
+            "rangeStart": "2026-09-02T17:00:00",
+            "rangeEnd": "2026-09-02T19:00:00",
+            "durationMinutes": 60,
+        })
+        check("find_free_time", res.get("ok") and res.get("windows")
+              and res["windows"][0]["availableMinutes"] >= 60, json.dumps(res)[:200])
+
+        res = call_tool(page, "tempo_schedule_event", {
+            "title": "Scheduled Focus",
+            "rangeStart": "2026-09-02T17:00:00",
+            "rangeEnd": "2026-09-02T19:00:00",
+            "durationMinutes": 60,
+        })
+        check("schedule_event", res.get("ok") and res["event"]["title"] == "Scheduled Focus",
+              json.dumps(res)[:200])
+        scheduled_id = res["event"]["id"]
+
+        standup_occurrences = call_tool(page, "tempo_list_events", {
+            "start": "2026-09-02T00:00:00",
+            "end": "2026-09-03T00:00:00",
+            "query": "standup",
+        })
+        standup_occurrence_id = standup_occurrences["events"][0]["id"]
+        push_js = "([n, i]) => { window.__pushResult = document.modelContext.executeTool(n, i); }"
+        page.evaluate(push_js, ["tempo_push_events", {
+            "anchorEventId": standup_occurrence_id,
+            "offsetMinutes": 30,
+        }])
+        page.wait_for_selector("text=Move 1 event 30 minutes later")
+        page.get_by_role("button", name="Push events", exact=True).click()
+        page.wait_for_timeout(300)
+        res = page.evaluate("window.__pushResult.then((r) => JSON.parse(r))")
+        check("push_events", res.get("ok") and res.get("changedCount") == 1,
+              json.dumps(res)[:200])
+        moved_scheduled = call_tool(page, "tempo_get_event", {"eventId": scheduled_id})
+        check("push moved scheduled event", moved_scheduled.get("ok")
+              and "17:30" in page.evaluate("(r) => new Date(r).toTimeString()", moved_scheduled["event"]["start"]))
+        page.wait_for_timeout(300)
+        undo_push = call_tool(page, "tempo_undo")
+        page.wait_for_timeout(300)
+        restored_scheduled = call_tool(page, "tempo_get_event", {"eventId": scheduled_id})
+        check("single undo restores whole push", undo_push.get("ok") and restored_scheduled.get("ok")
+              and "17:00" in page.evaluate("(r) => new Date(r).toTimeString()", restored_scheduled["event"]["start"]))
+
         # 11. Confirmation dialog: decline then approve. Registration and the
         # global confirmation flow remain active while Chat is selected.
         page.get_by_role("tab", name="Chat").click()
@@ -578,7 +683,7 @@ def main():
         res = call_tool(page, "tempo_get_event", {"eventId": event_id})
         check("state survives reload", res.get("ok"))
         tools2 = page.evaluate("document.modelContext.getTools()")
-        check("tools re-registered after reload", len(tools2) >= 14)
+        check("tools re-registered after reload", len(tools2) >= 17)
 
         check("no page errors", not errors, "; ".join(errors)[:200])
         browser.close()

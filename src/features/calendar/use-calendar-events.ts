@@ -127,6 +127,8 @@ export interface CalendarEventsStore {
   addEvent: (event: CalendarEvent) => void;
   /** Replace an existing event. Occurrence edits are mapped back to the series. */
   updateEvent: (event: CalendarEvent) => void;
+  /** Replace multiple events in one history transaction. */
+  updateEvents: (events: CalendarEvent[]) => void;
   /** Remove an event (or whole series) by id or object reference. */
   deleteEvent: (event: CalendarEvent | string) => void;
   /** Look up a single base event by id. */
@@ -242,6 +244,39 @@ export function useCalendarEvents(): CalendarEventsStore {
           events: prev.events.map((e) => (e.id === baseId ? nextEvent : e)),
         };
       }, `update:${event.baseId ?? event.id}`);
+    },
+    [commit],
+  );
+
+  const updateEvents = useCallback(
+    (updatedEvents: CalendarEvent[]) => {
+      const persistentEvents = updatedEvents.filter(
+        (event) => !event.tutorialOnly,
+      );
+      if (persistentEvents.length === 0) return;
+      commit((prev) => {
+        const replacements = new Map<string, CalendarEvent>();
+        for (const event of persistentEvents) {
+          const baseId = event.baseId ?? event.id;
+          const base = prev.events.find((candidate) => candidate.id === baseId);
+          if (!base) continue;
+          replacements.set(
+            baseId,
+            event.baseId ? occurrenceEditToSeries(event, base) : event,
+          );
+        }
+        if (replacements.size === 0) return prev;
+        let changed = false;
+        const nextEvents = prev.events.map((event) => {
+          const replacement = replacements.get(event.id);
+          if (!replacement || JSON.stringify(replacement) === JSON.stringify(event)) {
+            return event;
+          }
+          changed = true;
+          return replacement;
+        });
+        return changed ? { ...prev, events: nextEvents } : prev;
+      });
     },
     [commit],
   );
@@ -395,6 +430,7 @@ export function useCalendarEvents(): CalendarEventsStore {
       calendars,
       addEvent,
       updateEvent,
+      updateEvents,
       deleteEvent,
       getEvent: (id: string) => events.find((event) => event.id === id),
       duplicateEvent,
@@ -415,6 +451,7 @@ export function useCalendarEvents(): CalendarEventsStore {
       calendars,
       addEvent,
       updateEvent,
+      updateEvents,
       deleteEvent,
       duplicateEvent,
       copyEvent,

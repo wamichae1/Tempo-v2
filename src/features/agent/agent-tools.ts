@@ -14,6 +14,20 @@ const ISO_DATE_TIME = {
   description: "ISO 8601 date-time, e.g. 2026-09-02T14:00:00",
 } as const;
 
+const LOCAL_TIME = {
+  type: "string",
+  pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+  description: "Local wall-clock time in HH:mm format.",
+} as const;
+
+const CALENDAR_IDS = {
+  type: "array",
+  minItems: 1,
+  uniqueItems: true,
+  items: { type: "string" },
+  description: "Calendar ids to include; omission uses the documented default.",
+} as const;
+
 const RECURRENCE_SCHEMA = {
   type: "object",
   description: "RFC 5545-style recurrence rule (subset).",
@@ -74,6 +88,46 @@ export const TOOL_SCHEMAS = {
     },
     required: ["start", "end"],
   },
+  tempo_find_free_time: {
+    type: "object",
+    properties: {
+      rangeStart: ISO_DATE_TIME,
+      rangeEnd: ISO_DATE_TIME,
+      durationMinutes: { type: "integer", minimum: 1 },
+      calendarIds: {
+        ...CALENDAR_IDS,
+        description: "Calendars whose events count as busy; omission uses all calendars.",
+      },
+      preferredStartTime: LOCAL_TIME,
+      preferredEndTime: LOCAL_TIME,
+    },
+    required: ["rangeStart", "rangeEnd", "durationMinutes"],
+  },
+  tempo_push_events: {
+    type: "object",
+    properties: {
+      anchorEventId: {
+        type: "string",
+        description: "Event id, or an exact occurrence id for a recurring anchor.",
+      },
+      offsetMinutes: {
+        type: "integer",
+        description: "Signed non-zero offset; positive moves later, negative moves earlier.",
+      },
+      scope: {
+        type: "string",
+        enum: ["same_day", "date_range"],
+        description: "Defaults to same_day. date_range requires rangeStart and rangeEnd.",
+      },
+      rangeStart: ISO_DATE_TIME,
+      rangeEnd: ISO_DATE_TIME,
+      calendarIds: {
+        ...CALENDAR_IDS,
+        description: "Calendars to modify; omission uses only the anchor calendar.",
+      },
+    },
+    required: ["anchorEventId", "offsetMinutes"],
+  },
   tempo_create_event: {
     type: "object",
     properties: {
@@ -90,6 +144,28 @@ export const TOOL_SCHEMAS = {
       recurrence: RECURRENCE_SCHEMA,
     },
     required: ["title", "start", "end"],
+  },
+  tempo_schedule_event: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      rangeStart: ISO_DATE_TIME,
+      rangeEnd: ISO_DATE_TIME,
+      durationMinutes: { type: "integer", minimum: 1 },
+      preferredStartTime: LOCAL_TIME,
+      preferredEndTime: LOCAL_TIME,
+      calendarId: {
+        type: "string",
+        description: "Destination calendar; defaults to the first visible calendar.",
+      },
+      busyCalendarIds: {
+        ...CALENDAR_IDS,
+        description: "Calendars whose events count as busy; omission uses all calendars.",
+      },
+      description: { type: "string" },
+      location: { type: "string" },
+    },
+    required: ["title", "rangeStart", "rangeEnd", "durationMinutes"],
   },
   tempo_update_event: {
     type: "object",

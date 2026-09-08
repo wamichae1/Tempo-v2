@@ -31,9 +31,9 @@ export const OCCURRENCE_ID_SEPARATOR = "@@";
 const WEEKDAY_TOKENS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"] as const;
 
 /** Hard cap on occurrences generated for a single series in one expansion. */
-const MAX_OCCURRENCES = 500;
+export const MAX_RECURRENCE_OCCURRENCES = 500;
 /** Hard cap on days scanned while expanding (safety for pathological rules). */
-const MAX_SCAN_DAYS = 366 * 20;
+export const RECURRENCE_EXPANSION_DAYS = 366 * 20;
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
@@ -227,7 +227,7 @@ export function expandEventOccurrences(
   let produced = 0;
   let scanned = 0;
 
-  while (scanned < MAX_SCAN_DAYS) {
+  while (scanned < RECURRENCE_EXPANSION_DAYS) {
     scanned += 1;
     if (untilDay && day > untilDay) break;
     // Occurrences far beyond the visible range are not needed.
@@ -258,7 +258,7 @@ export function expandEventOccurrences(
       }
     }
 
-    if (produced >= MAX_OCCURRENCES) break;
+    if (produced >= MAX_RECURRENCE_OCCURRENCES) break;
     day = addDays(day, 1);
   }
 

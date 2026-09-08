@@ -38,6 +38,7 @@ export interface AgentToolInfo {
  * Mirrors the `confirm(...)` call sites in agent-handlers.ts — keep in sync.
  */
 export const CONFIRMATION_PROTECTED: ReadonlySet<string> = new Set([
+  "tempo_push_events",
   "tempo_delete_event",
   "tempo_delete_calendar",
 ]);
