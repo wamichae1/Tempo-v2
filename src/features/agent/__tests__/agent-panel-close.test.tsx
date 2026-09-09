@@ -32,7 +32,7 @@ vi.mock("@/features/agent/use-ai-settings", () => ({
 import { AgentPanel } from "@/features/agent/agent-panel";
 import type { AgentToolsState } from "@/features/agent/use-agent-tools";
 
-describe("AgentPanel close button", () => {
+describe("AgentPanel toggle", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -62,25 +62,29 @@ describe("AgentPanel close button", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders an accessible close button in the header row", async () => {
+  it("renders an accessible panel toggle in the header row", async () => {
     await render(vi.fn());
-    const close = container.querySelector(
-      'button[aria-label="Close Tempo Agent"]',
+    const toggle = container.querySelector(
+      'button[aria-label="Close Agent panel"]',
     ) as HTMLButtonElement | null;
-    expect(close).not.toBeNull();
-    expect(close?.title).toBe("Close Tempo Agent");
+    expect(toggle).not.toBeNull();
+    expect(toggle?.title).toBe("Close Agent panel");
+    expect(toggle?.dataset.variant).toBe("ghost");
+    expect(toggle?.dataset.size).toBe("icon");
+    expect(toggle?.classList.contains("size-8")).toBe(true);
+    expect(toggle?.querySelector(".lucide-panel-right-close")).not.toBeNull();
     // Same header row as the "Tempo Agent" label.
-    expect(close?.parentElement?.textContent).toContain("Tempo Agent");
+    expect(toggle?.parentElement?.textContent).toContain("Tempo Agent");
   });
 
   it("invokes onClose when clicked", async () => {
     const onClose = vi.fn();
     await render(onClose);
-    const close = container.querySelector(
-      'button[aria-label="Close Tempo Agent"]',
+    const toggle = container.querySelector(
+      'button[aria-label="Close Agent panel"]',
     ) as HTMLButtonElement;
     await act(async () => {
-      close.click();
+      toggle.click();
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

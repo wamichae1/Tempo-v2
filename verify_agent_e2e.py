@@ -315,7 +315,23 @@ def main():
             print(f"\n{len(results) - len(failed)}/{len(results)} passed")
             sys.exit(1 if failed else 0)
 
-        # 2. Built-in Chat: configuration, direct provider request, shared
+        # 2. Agent panel controls: the in-panel control collapses the panel and
+        # the existing top-bar Bot control reopens the same panel.
+        agent_panel = page.locator("[data-tour='agent-panel']")
+        close_agent_panel = page.get_by_role("button", name="Close Agent panel")
+        check("agent panel toggle visible", close_agent_panel.is_visible())
+        check("agent panel toggle title",
+              close_agent_panel.get_attribute("title") == "Close Agent panel")
+        close_agent_panel.click()
+        agent_panel.wait_for(state="hidden")
+        check("agent panel toggle closes panel", not agent_panel.is_visible())
+        top_bar_agent = page.locator("[data-tour='agent-toggle']")
+        check("top-bar Bot toggle remains visible", top_bar_agent.is_visible())
+        top_bar_agent.click()
+        agent_panel.wait_for(state="visible")
+        check("top-bar Bot toggle reopens panel", agent_panel.is_visible())
+
+        # 3. Built-in Chat: configuration, direct provider request, shared
         # tool execution, transcript persistence, and key privacy.
         chat_tab = page.get_by_role("tab", name="Chat")
         webmcp_tab = page.get_by_role("tab", name="WebMCP")

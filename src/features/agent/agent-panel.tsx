@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { PanelRightClose, Sparkles } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { AgentChat } from "@/features/agent/agent-chat";
 import { useAgentChat } from "@/features/agent/use-agent-chat";
 import { useAiSettings } from "@/features/agent/use-ai-settings";
@@ -79,15 +80,16 @@ export function AgentPanel({
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <Sparkles className="text-muted-foreground size-3.5" />
         <span className="text-xs font-semibold">Tempo Agent</span>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-8"
           onClick={onClose}
-          title="Close Tempo Agent"
-          aria-label="Close Tempo Agent"
-          className="hover:bg-accent text-muted-foreground hover:text-foreground ml-auto flex size-6 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+          title="Close Agent panel"
+          aria-label="Close Agent panel"
         >
-          <X className="size-3.5" />
-        </button>
+          <PanelRightClose className="size-4" />
+        </Button>
       </div>
 
       <div
