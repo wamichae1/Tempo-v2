@@ -19,6 +19,8 @@ export type {
   WeekDay,
   HourSlot,
   EventReminder,
+  CalendarEventSource,
+  ICSTimeMode,
   CalendarEvent,
   EventColor,
   PositionedEvent,

@@ -73,6 +73,7 @@ describe("AI settings and API key storage", () => {
     expect(storage.getItem(getApiKeyStorageKey("openai"))).toBeNull();
 
     persistApiKey(storage, "openrouter", "sk-or-test", true);
+    persistApiKey(storage, "groq", "gsk-test", true);
     persistApiKey(storage, "opencode", "sk-opencode-test", true);
     persistApiKey(storage, "gemini", "gemini-test", true);
     const loaded = loadPersistedApiKeys(storage);
@@ -81,6 +82,7 @@ describe("AI settings and API key storage", () => {
       persisted: true,
     });
     expect(loaded.opencode.value).toBe("");
+    expect(loaded.groq.value).toBe("gsk-test");
     expect(storage.getItem(getApiKeyStorageKey("opencode"))).toBe(
       "sk-opencode-test",
     );
@@ -93,6 +95,7 @@ describe("AI settings and API key storage", () => {
     for (const provider of [
       "openai",
       "openrouter",
+      "groq",
       "opencode",
       "gemini",
       "nvidia-nim",
@@ -113,6 +116,7 @@ describe("AI settings and API key storage", () => {
         models: {
           openai: "gpt-test",
           openrouter: "openrouter-test",
+          groq: "openai/gpt-oss-120b",
           opencode: "gpt-5.4-mini",
           gemini: "gemini-3.7-flash",
         },
@@ -124,6 +128,38 @@ describe("AI settings and API key storage", () => {
     expect(storage.getItem(getApiKeyStorageKey("opencode"))).toBe(
       "saved-opencode-key",
     );
+  });
+
+  it("adds and preserves Groq model settings in existing v2 records", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      AI_SETTINGS_V2_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        provider: "openai",
+        models: {
+          openai: "gpt-test",
+          openrouter: "openrouter-test",
+          opencode: "gpt-5.4-mini",
+          gemini: "gemini-3.7-flash",
+        },
+      }),
+    );
+
+    const upgraded = loadAiSettings(storage).settings;
+    expect(upgraded.models.groq).toBe("openai/gpt-oss-20b");
+    upgraded.provider = "groq";
+    upgraded.models.groq = "openai/gpt-oss-120b";
+
+    const reloadedStorage = new MemoryStorage();
+    reloadedStorage.setItem(
+      AI_SETTINGS_V2_STORAGE_KEY,
+      serializeAiSettings(upgraded),
+    );
+    expect(loadAiSettings(reloadedStorage).settings).toMatchObject({
+      provider: "groq",
+      models: { groq: "openai/gpt-oss-120b" },
+    });
   });
 
   it("masks API keys by default while retaining only the final four characters", () => {

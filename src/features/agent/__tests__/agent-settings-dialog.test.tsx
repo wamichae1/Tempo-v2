@@ -68,6 +68,7 @@ function createSettings(
     models: {
       openai: "gpt-test",
       openrouter: "openrouter-test",
+      groq: "openai/gpt-oss-20b",
       opencode: "gpt-5.4-mini",
       gemini: "gemini-3.7-flash",
     },
@@ -242,5 +243,34 @@ describe("AgentSettingsDialog API-key validation lifecycle", () => {
     expect(document.body.textContent).toContain(
       "Tempo has no backend and never receives your keys.",
     );
+  });
+
+  it("shows Groq as an enabled provider with its own API-key row", async () => {
+    const settings = createSettings(
+      structuredClone(EMPTY_API_KEY_STATES),
+      vi.fn<AiSettingsState["saveApiKey"]>(),
+    );
+    await act(async () => {
+      root.render(
+        <AgentSettingsDialog
+          open
+          onClose={vi.fn()}
+          settings={settings}
+          confirmationsEnabled
+          onConfirmationsEnabledChange={vi.fn()}
+        />,
+      );
+    });
+
+    const option = document.querySelector(
+      'option[value="groq"]',
+    ) as HTMLOptionElement | null;
+    expect(option?.disabled).toBe(false);
+    expect(option?.textContent).toContain("Groq");
+
+    await click("API Keys");
+    const row = document.querySelector('[data-provider-id="groq"]');
+    expect(row?.textContent).toContain("Groq");
+    expect(row?.textContent).toContain("Not configured");
   });
 });

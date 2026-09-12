@@ -112,4 +112,64 @@ describe("CalendarEventsStore.updateEvents", () => {
     expect(store.events[0].start).toEqual(d(12));
     expect(store.canUndo).toBe(true);
   });
+
+  it("imports a batch atomically and restores it with one undo operation", async () => {
+    let result: ReturnType<CalendarEventsStore["importEvents"]>;
+    await act(async () => {
+      result = store.importEvents(
+        [
+          { title: "Imported one", start: d(12), end: d(13) },
+          { title: "Imported two", start: d(14), end: d(15) },
+        ],
+        "cal",
+      );
+    });
+
+    expect(result!).toMatchObject({ ok: true });
+    expect(store.events.map((event) => event.title)).toEqual([
+      "One",
+      "Two",
+      "Imported one",
+      "Imported two",
+    ]);
+    expect(store.canUndo).toBe(true);
+
+    await act(async () => store.undo());
+    expect(store.events.map((event) => event.title)).toEqual(["One", "Two"]);
+    expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(true);
+
+    await act(async () => store.redo());
+    expect(store.events.map((event) => event.title)).toEqual([
+      "One",
+      "Two",
+      "Imported one",
+      "Imported two",
+    ]);
+  });
+
+  it("rejects an invalid destination or member without a partial import", async () => {
+    const before = store.events;
+    let missingCalendar: ReturnType<CalendarEventsStore["importEvents"]>;
+    let invalidEvent: ReturnType<CalendarEventsStore["importEvents"]>;
+
+    await act(async () => {
+      missingCalendar = store.importEvents(
+        [{ title: "No calendar", start: d(12), end: d(13) }],
+        "missing",
+      );
+      invalidEvent = store.importEvents(
+        [
+          { title: "Valid", start: d(12), end: d(13) },
+          { title: "Invalid", start: d(14), end: d(13) },
+        ],
+        "cal",
+      );
+    });
+
+    expect(missingCalendar!).toMatchObject({ ok: false });
+    expect(invalidEvent!).toMatchObject({ ok: false });
+    expect(store.events).toBe(before);
+    expect(store.canUndo).toBe(false);
+  });
 });

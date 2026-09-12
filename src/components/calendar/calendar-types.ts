@@ -46,6 +46,22 @@ export interface EventReminder {
   unit: "minutes" | "hours" | "days";
 }
 
+export type ICSTimeMode = "date" | "floating" | "utc" | "zoned";
+
+export interface CalendarEventSource {
+  kind: "ics";
+  uid?: string;
+  calendarName?: string;
+  time: {
+    startValue: string;
+    endValue?: string;
+    startTzid?: string;
+    endTzid?: string;
+    startMode: ICSTimeMode;
+    endMode?: ICSTimeMode;
+  };
+}
+
 /**
  * Represents a calendar event
  */
@@ -92,6 +108,8 @@ export interface CalendarEvent {
   visibility?: "default" | "public" | "private";
   /** Calendar account email for display */
   calendarEmail?: string;
+  /** Original source metadata retained for deterministic imports/deduplication. */
+  source?: CalendarEventSource;
   /**
    * Internal marker for ephemeral onboarding events. Tutorial-only events are
    * rendered by the calendar but must never enter persistence or history.

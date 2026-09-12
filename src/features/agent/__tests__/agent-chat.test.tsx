@@ -52,6 +52,7 @@ function createSettings(
     models: {
       openai: "gpt-test",
       openrouter: "openrouter-test",
+      groq: "openai/gpt-oss-20b",
       opencode: "gpt-5.4-mini",
       gemini: "gemini-3.7-flash",
     },

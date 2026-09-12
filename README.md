@@ -13,9 +13,9 @@ Most calendar apps treat AI as a sidebar chatbot. Tempo treats it as a first-cla
 
 The calendar structure is from [calendarcn](https://github.com/vmnog/calendarcn) by vmnog, which is a open source React calendar component. By taking the key basic features of the calendar I basically made a working standard calendar tool. Once calendarcn was implemented into Tempo, state management taken out of individual components so the agent would eventually be able to access the tools. A few additional tools added include the undo/redo feature, conflict detection which checks an event against other events instead of the full calendar and `localStorage` persistence so even locally the users data is saved on the browser. Other features include ICS import and export to make this usable, and some other smaller features such as choosing colors for different calendars.
 
-With the calendar working, I created WebMCP tools using the `document.modelContext`, so that an agent can perform actions on the calendar. This method allows for a user or an agent to use the exact same code when doing tasks, allowing the agent to complete tasks way more efficiently and accuractly. There is confirmation steps for `tempo_delete_event` and ` tempo_delete_calendar` so these can't be accidentally activated by the agent without approval. The tools are listed on the Tempo Agent WebMCP panel. 
+With the calendar working, I created WebMCP tools using the `document.modelContext`, so that an agent can perform actions on the calendar. This method allows for a user or an agent to use the exact same code when doing tasks, allowing the agent to complete tasks way more efficiently and accuractly. Confirmation-protected operations such as event pushing and deleting events or calendars cannot run without approval when confirmations are enabled. The tools are listed on the Tempo Agent WebMCP panel.
 
-The newest change is relating to BYO API Key, which is relatively common nowadays. Throughout the developement of this project, ai was used. Many providers such as OpenRouter, NVIDIA NIM and Google Gemini have free plans with their API Keys so you can access some models. I like how this project won't cost me or the user any money to run. Since tempo has no backend, so requests go straight from the browser to your api provider. This however means that OpenCode and NVIDIA NIM won't work as they don't allow direct browser requesting. Future implementation of these and other similar providers means that Tempo will eventually need a backend proxy to relay the requests.
+The newest change is relating to BYO API Key, which is relatively common nowadays. Throughout the developement of this project, ai was used. Providers such as OpenRouter, Groq, and Google Gemini offer practical low-cost or free-plan access to supported models. I like how this project won't cost me or the user any money to run. Since Tempo has no backend, requests go straight from the browser to your AI provider. This currently means that OpenCode and NVIDIA NIM remain unavailable because they do not allow the browser access Tempo's static deployment requires.
 
 
 
@@ -39,7 +39,7 @@ The newest change is relating to BYO API Key, which is relatively common nowaday
 The right-side Tempo Agent panel is the home for two related experiences:
 
 - **Chat** connects directly from the browser to the selected AI provider with
-  the user's own API key. It streams text and uses the same 14 Tempo tools as
+  the user's own API key. It streams text and uses the same 17 Tempo tools as
   WebMCP.
 - **WebMCP** is the existing inspector for the tools exposed to compatible
   external agents.
@@ -48,7 +48,7 @@ The right-side Tempo Agent panel is the home for two related experiences:
 
 1. Open **Tempo Agent → Chat**.
 2. Open the settings dialog.
-3. Choose OpenAI, OpenRouter, or Google Gemini. Other providers such as OpenCode and NVIDIA NIM will be available soon.
+3. Choose OpenAI, OpenRouter, Groq, or Google Gemini. OpenCode and NVIDIA NIM remain unavailable in the static browser deployment.
 4. Add a separate API key for that provider. Leave **Remember API key** off to
    keep it in memory only, or explicitly enable it to store the key unencrypted
    in this browser's `localStorage`.
@@ -91,8 +91,8 @@ Tempo exposes its calendar functionality through [WebMCP](https://webmachinelear
 - Destructive actions (deleting events or calendars) can require an in-app user confirmation, with a timeout, before they execute.
 - WebMCP support is feature-detected at runtime — Tempo works fine in browsers without `document.modelContext`; the WebMCP view simply reflects availability.
 - Tempo Chat uses a provider-neutral runtime with OpenAI, OpenRouter, OpenCode
-  Zen, and Google Gemini implementations. WebMCP and built-in Chat execute the
-  same tool objects and handlers.
+  Zen, Groq, and Google Gemini implementations. OpenCode remains deferred in
+  the browser. WebMCP and built-in Chat execute the same tool objects and handlers.
 - Built with and adapted from [CalendarCN](https://github.com/vmnog/calendarcn), an open-source React calendar component. Tempo incorporates and modifies several of its calendar UI elements.
 
 ## Tech stack
@@ -145,6 +145,8 @@ Tempo is fully local-first:
   in browser `localStorage`, separately from ordinary settings.
 - **Model lists are fetched from the selected provider.** Catalog metadata is
   cached only in memory and never contains or stores API keys.
+- **Groq model selection is curated.** Tempo currently exposes GPT-OSS 20B and
+  GPT-OSS 120B when they are available to the configured Groq project.
 - Chat transcripts never persist API keys or provider continuation data.
 - **No external calendar integration** (Google, Outlook, etc.) currently exists; ICS import/export is the interchange mechanism.
 

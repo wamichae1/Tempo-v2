@@ -4,6 +4,7 @@ import type { AgentErrorCode } from "@/features/agent/agent-chat-state";
 export type AiProviderId =
   | "openai"
   | "openrouter"
+  | "groq"
   | "opencode"
   | "gemini"
   | "nvidia-nim";

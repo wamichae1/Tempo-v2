@@ -95,4 +95,29 @@ describe("useAiSettings candidate validation", () => {
 
     expect(current.getKeyState("gemini")).toEqual(initial);
   });
+
+  it("keeps Groq key state separate from other providers", async () => {
+    validationMocks.validateAndPersistApiKey.mockResolvedValueOnce({
+      ok: true,
+      state: {
+        value: "gsk-session-key",
+        persisted: false,
+        revision: 1,
+        status: "verified",
+        error: "",
+      },
+    } satisfies ApiKeySaveResult);
+
+    await act(async () => {
+      await current.saveApiKey("groq", "gsk-session-key", false);
+    });
+
+    expect(current.getKeyState("groq")).toMatchObject({
+      value: "gsk-session-key",
+      persisted: false,
+      status: "verified",
+    });
+    expect(current.getKeyState("openai").value).toBe("");
+    expect(current.models.groq).toBe("openai/gpt-oss-20b");
+  });
 });

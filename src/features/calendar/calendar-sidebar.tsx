@@ -20,14 +20,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { CalendarEvent, EventColor } from "@/components/calendar";
-import { createEventId } from "@/features/calendar/use-calendar-events";
+import type {
+  CalendarEventImport,
+  ImportEventsResult,
+} from "@/features/calendar/use-calendar-events";
 import type { Calendar } from "@/features/calendar/types";
 import {
   EVENT_COLORS,
   EVENT_COLOR_DOT_CLASS,
   createCalendarId,
 } from "@/features/calendar/types";
-import { downloadICS, generateICS, parseICS } from "@/lib/ics";
+import { ICSImportDialog } from "@/features/calendar/ics-import-dialog";
+import { downloadICS, generateICS } from "@/lib/ics";
+import {
+  MAX_ICS_FILE_BYTES,
+  parseICSImport,
+  type ICSImportParseResult,
+} from "@/lib/ics-import";
 
 const colorDotClass = EVENT_COLOR_DOT_CLASS;
 
@@ -37,7 +46,10 @@ export interface CalendarSidebarProps {
   addCalendar: (name: string, color: EventColor) => Calendar;
   updateCalendar: (calendar: Calendar) => void;
   deleteCalendar: (calendarId: string) => void;
-  importEvents: (events: CalendarEvent[], calendarId: string) => void;
+  importEvents: (
+    events: CalendarEventImport[],
+    calendarId: string,
+  ) => ImportEventsResult;
   /** Optional mini month calendar rendered below the calendar list. */
   miniCalendar?: React.ReactNode;
   className?: string;
@@ -69,16 +81,23 @@ export function CalendarSidebar({
   const [renameValue, setRenameValue] = React.useState("");
   const [toast, setToast] = React.useState<Toast | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  /** Calendar chosen as the target for the next import (default: first). */
+  const importRequestRef = React.useRef(0);
+  /** Explicit target supplied by "Import into this calendar". */
   const [importTargetId, setImportTargetId] = React.useState<string | null>(null);
-  /** Whether the general "Import .ics" destination picker is open. */
-  const [importPickerOpen, setImportPickerOpen] = React.useState(false);
+  const [importDialog, setImportDialog] = React.useState<{
+    open: boolean;
+    fileName: string;
+    loading: boolean;
+    parsed: ICSImportParseResult | null;
+    readError?: string;
+  }>({
+    open: false,
+    fileName: "",
+    loading: false,
+    parsed: null,
+  });
   /** Calendar id pending deletion confirmation (null = dialog closed). */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null);
-
-  /** Default import destination: first visible calendar, else first. */
-  const defaultImportTarget =
-    calendars.find((c) => c.visible) ?? calendars[0];
 
   const pendingDeleteCalendar = pendingDeleteId
     ? calendars.find((c) => c.id === pendingDeleteId)
@@ -119,48 +138,55 @@ export function CalendarSidebar({
   };
 
   const handleImportFile = async (file: File) => {
+    const requestId = importRequestRef.current + 1;
+    importRequestRef.current = requestId;
+    setImportDialog({
+      open: true,
+      fileName: file.name,
+      loading: true,
+      parsed: null,
+    });
     try {
-      const text = await file.text();
-      const parsed = parseICS(text);
-      if (parsed.events.length === 0) {
-        setToast({
-          title: "Import failed",
-          description: "No events found in that file.",
-          variant: "error",
+      if (file.size > MAX_ICS_FILE_BYTES) {
+        setImportDialog({
+          open: true,
+          fileName: file.name,
+          loading: false,
+          parsed: null,
+          readError: `This file is larger than ${Math.round(MAX_ICS_FILE_BYTES / 1024 / 1024)} MiB.`,
         });
         return;
       }
-      const targetId = importTargetId ?? calendars[0]?.id;
-      if (!targetId) return;
-      const targetName =
-        calendars.find((c) => c.id === targetId)?.name ?? "calendar";
-      const imported: CalendarEvent[] = parsed.events.map((e) => ({
-        id: createEventId(),
-        title: e.title,
-        start: e.start,
-        end: e.end,
-        isAllDay: e.isAllDay,
-        description: e.description,
-        location: e.location,
-        rrule: e.rrule,
-        color: e.color ?? parsed.calendarColor,
-        calendarId: targetId,
-      }));
-      importEvents(imported, targetId);
-      const warn =
-        parsed.warnings.length > 0 ? ` (${parsed.warnings.length} skipped/warnings)` : "";
-      setToast({
-        title: `Imported ${imported.length} event${imported.length === 1 ? "" : "s"}${warn}`,
-        description: `Added to ${targetName}`,
-        variant: "default",
+      const text = await file.text();
+      const parsed = await parseICSImport(text, file.name);
+      if (requestId !== importRequestRef.current) return;
+      setImportDialog({
+        open: true,
+        fileName: file.name,
+        loading: false,
+        parsed,
       });
-    } catch {
-      setToast({
-        title: "Import failed",
-        description: "Could not read that file.",
-        variant: "error",
+    } catch (error) {
+      if (requestId !== importRequestRef.current) return;
+      setImportDialog({
+        open: true,
+        fileName: file.name,
+        loading: false,
+        parsed: null,
+        readError:
+          error instanceof Error ? error.message : "Could not read that file.",
       });
     }
+  };
+
+  const closeImportDialog = () => {
+    importRequestRef.current += 1;
+    setImportDialog({
+      open: false,
+      fileName: "",
+      loading: false,
+      parsed: null,
+    });
   };
 
   const handleExport = (calendar?: Calendar) => {
@@ -369,7 +395,8 @@ export function CalendarSidebar({
               });
               return;
             }
-            setImportPickerOpen(true);
+            setImportTargetId(null);
+            fileInputRef.current?.click();
           }}
         >
           <Upload className="size-3.5" /> Import .ics…
@@ -422,63 +449,26 @@ export function CalendarSidebar({
         }}
       />
 
-      {/* General ICS import: choose the destination calendar first. */}
-      <TempoDialog
-        open={importPickerOpen}
-        onClose={() => setImportPickerOpen(false)}
-        title="Import events to"
-        description="Choose which calendar the imported events belong to."
-        widthClass="w-[280px]"
-      >
-        <div
-          className="mt-2 flex flex-col"
-          role="listbox"
-          aria-label="Destination calendar"
-        >
-          {calendars.map((calendar) => {
-            const selected = calendar.id === defaultImportTarget?.id;
-            return (
-              <button
-                key={calendar.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                className={cn(
-                  "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
-                  "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
-                )}
-                onClick={() => {
-                  setImportTargetId(calendar.id);
-                  setImportPickerOpen(false);
-                  // Open the file picker on the next frame so the dialog has
-                  // closed before the native file dialog appears.
-                  requestAnimationFrame(() => fileInputRef.current?.click());
-                }}
-              >
-                <span
-                  className={cn(
-                    "size-2.5 shrink-0 rounded-xs",
-                    colorDotClass[calendar.color],
-                  )}
-                />
-                <span className="min-w-0 flex-1 truncate">{calendar.name}</span>
-                {selected && (
-                  <Check className="text-muted-foreground size-3.5" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-3 flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setImportPickerOpen(false)}
-          >
-            Cancel
-          </Button>
-        </div>
-      </TempoDialog>
+      <ICSImportDialog
+        open={importDialog.open}
+        fileName={importDialog.fileName}
+        loading={importDialog.loading}
+        parsed={importDialog.parsed}
+        readError={importDialog.readError}
+        calendars={calendars}
+        existingEvents={events}
+        initialCalendarId={importTargetId ?? undefined}
+        onClose={closeImportDialog}
+        onImport={importEvents}
+        onImported={(count, calendarName) => {
+          closeImportDialog();
+          setToast({
+            title: `Imported ${count} event${count === 1 ? "" : "s"}`,
+            description: `Added to ${calendarName}`,
+            variant: "default",
+          });
+        }}
+      />
 
       {/* Delete calendar confirmation. */}
       <TempoDialog

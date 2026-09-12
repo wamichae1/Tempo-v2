@@ -29,10 +29,13 @@ import type {
   AiProviderEvent,
 } from "@/features/agent/ai/ai-provider";
 import { runAgentTurn } from "@/features/agent/agent-runtime";
+import { buildAgentTools } from "@/features/agent/agent-handlers";
 import { GeminiProvider } from "@/features/agent/ai/gemini-provider";
+import { GroqProvider } from "@/features/agent/ai/groq-provider";
 import { OpenAiProvider } from "@/features/agent/ai/openai-provider";
 import { OpenCodeProvider } from "@/features/agent/ai/opencode-provider";
 import { OpenRouterProvider } from "@/features/agent/ai/openrouter-provider";
+import type { CalendarEventsStore } from "@/features/calendar/use-calendar-events";
 
 function sseResponse(events: unknown[]): Response {
   const body = events
@@ -192,6 +195,304 @@ describe("provider implementations", () => {
       }),
     );
     expect(fetchMock.mock.calls[2]?.[1]?.body).not.toContain("test-only-key");
+  });
+
+  it("discovers only curated Groq models and streams tool-call arguments", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            {
+              id: "openai/gpt-oss-120b",
+              owned_by: "OpenAI",
+              active: true,
+              context_window: 131_072,
+            },
+            {
+              id: "qwen/qwen3-32b",
+              owned_by: "Qwen",
+              active: true,
+            },
+            {
+              id: "openai/gpt-oss-20b",
+              owned_by: "OpenAI",
+              active: true,
+              context_window: 131_072,
+            },
+            {
+              id: "inactive-model",
+              active: false,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            choices: [{
+              delta: {
+                reasoning: "private reasoning",
+                content: "Checking",
+              },
+            }],
+          },
+          {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: "groq-call",
+                  function: {
+                    name: "tempo_test",
+                    arguments: "{\"day\":",
+                  },
+                }],
+              },
+            }],
+          },
+          {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  function: { arguments: "\"today\"}" },
+                }],
+              },
+            }],
+          },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new GroqProvider();
+    await expect(
+      provider.discoverModels({
+        apiKey: "test",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "openai/gpt-oss-20b",
+        providerId: "groq",
+        toolSupport: "supported",
+      }),
+      expect.objectContaining({
+        id: "openai/gpt-oss-120b",
+        providerId: "groq",
+        toolSupport: "supported",
+      }),
+    ]);
+
+    const events = await collect(provider);
+    expect(events).toContainEqual({ type: "text-delta", text: "Checking" });
+    expect(JSON.stringify(events)).not.toContain("private reasoning");
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        type: "completed",
+        result: expect.objectContaining({
+          text: "Checking",
+          toolCalls: [{
+            callId: "groq-call",
+            name: "tempo_test",
+            argumentsText: "{\"day\":\"today\"}",
+          }],
+        }),
+      }),
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.groq.com/openai/v1/models",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({
+      Authorization: "Bearer test",
+    });
+    const request = JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://api.groq.com/openai/v1/chat/completions",
+    );
+    expect(request).toMatchObject({
+      model: "openai/gpt-oss-20b",
+      reasoning_format: "hidden",
+      parallel_tool_calls: false,
+      stream: true,
+    });
+    expect(JSON.stringify(request)).not.toContain("test-only-key");
+  });
+
+  it("runs all Tempo tools through a multi-turn Groq tool result flow", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: "calendar-call",
+                  function: {
+                    name: "tempo_list_calendars",
+                    arguments: "{}",
+                  },
+                }],
+              },
+            }],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          { choices: [{ delta: { content: "You have one calendar." } }] },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const store = {
+      events: [],
+      calendars: [
+        { id: "calendar", name: "Calendar", color: "blue", visible: true },
+      ],
+    } as unknown as CalendarEventsStore;
+    const tools = buildAgentTools({
+      getStore: () => store,
+      confirm: vi.fn(async () => true),
+    });
+
+    await expect(
+      runAgentTurn({
+        provider: new GroqProvider(),
+        config: {
+          provider: "groq",
+          apiKey: "test-only-key",
+          model: "openai/gpt-oss-20b",
+        },
+        systemPrompt: "Use tools safely.",
+        conversation: [{ role: "user", text: "List my calendars." }],
+        tools,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      finalText: "You have one calendar.",
+      rounds: 2,
+      toolCalls: 1,
+    });
+
+    const firstRequest = JSON.parse(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    );
+    expect(firstRequest.tools).toHaveLength(17);
+    expect(firstRequest.tools.map(
+      (tool: { function: { name: string } }) => tool.function.name,
+    )).toEqual(tools.map((tool) => tool.name));
+
+    const continuationRequest = JSON.parse(
+      fetchMock.mock.calls[1]?.[1]?.body as string,
+    );
+    expect(continuationRequest.messages).toContainEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [{
+        id: "calendar-call",
+        type: "function",
+        function: {
+          name: "tempo_list_calendars",
+          arguments: "{}",
+        },
+      }],
+    });
+    expect(continuationRequest.messages.at(-1)).toMatchObject({
+      role: "tool",
+      tool_call_id: "calendar-call",
+      content: expect.stringContaining("\"ok\":true"),
+    });
+  });
+
+  it("keeps Tempo confirmation authoritative for Groq mutations", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: "delete-call",
+                  function: {
+                    name: "tempo_delete_event",
+                    arguments: "{\"eventId\":\"event-1\"}",
+                  },
+                }],
+              },
+            }],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          { choices: [{ delta: { content: "The event was deleted." } }] },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const event = {
+      id: "event-1",
+      title: "Delete me",
+      start: new Date(2026, 8, 12, 9),
+      end: new Date(2026, 8, 12, 10),
+      calendarId: "calendar",
+    };
+    const store = {
+      events: [event],
+      calendars: [
+        { id: "calendar", name: "Calendar", color: "blue", visible: true },
+      ],
+      getEvent: (id: string) =>
+        store.events.find((candidate) => candidate.id === id),
+      deleteEvent: vi.fn((id: string) => {
+        store.events = store.events.filter(
+          (candidate) => candidate.id !== id,
+        );
+      }),
+    } as unknown as CalendarEventsStore;
+    const confirm = vi.fn(async () => true);
+    const tools = buildAgentTools({
+      getStore: () => store,
+      confirm,
+    });
+
+    await expect(
+      runAgentTurn({
+        provider: new GroqProvider(),
+        config: {
+          provider: "groq",
+          apiKey: "test-only-key",
+          model: "openai/gpt-oss-20b",
+        },
+        systemPrompt: "Use tools safely.",
+        conversation: [{ role: "user", text: "Delete the event." }],
+        tools,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      finalText: "The event was deleted.",
+      rounds: 2,
+      toolCalls: 1,
+    });
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(store.deleteEvent).toHaveBeenCalledWith("event-1");
+    expect(store.events).toEqual([]);
+
+    const continuationRequest = JSON.parse(
+      fetchMock.mock.calls[1]?.[1]?.body as string,
+    );
+    expect(continuationRequest.messages.at(-1)).toMatchObject({
+      role: "tool",
+      tool_call_id: "delete-call",
+      content: expect.stringContaining("\"deleted\":\"event-1\""),
+    });
   });
 
   it("discovers and streams OpenCode Zen models", async () => {
@@ -499,6 +800,29 @@ describe("provider implementations", () => {
     },
   );
 
+  it.each([
+    [401, "authentication", false],
+    [403, "unsupported-model", false],
+    [404, "unsupported-model", false],
+    [413, "provider", false],
+    [422, "provider", true],
+    [429, "rate-limit", true],
+    [498, "rate-limit", true],
+    [503, "provider", true],
+  ] as const)(
+    "classifies Groq completion HTTP %s responses",
+    async (status, code, retryable) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValueOnce(new Response(null, { status })),
+      );
+      await expect(collect(new GroqProvider())).rejects.toMatchObject({
+        code,
+        retryable,
+      });
+    },
+  );
+
   it("classifies an OpenCode auth-probe fetch failure as network unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("CORS")));
     await expect(
@@ -591,6 +915,7 @@ describe("provider implementations", () => {
 
   it.each([
     ["openrouter", () => new OpenRouterProvider()],
+    ["groq", () => new GroqProvider()],
     ["opencode", () => new OpenCodeProvider()],
     ["gemini", () => new GeminiProvider()],
   ] as const)(

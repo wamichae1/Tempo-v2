@@ -114,6 +114,15 @@ export interface EventClipboard {
   event: CalendarEvent;
 }
 
+export type CalendarEventImport = Omit<
+  CalendarEvent,
+  "id" | "calendarId" | "baseId" | "occurrenceStart" | "tutorialOnly"
+>;
+
+export type ImportEventsResult =
+  | { ok: true; events: CalendarEvent[] }
+  | { ok: false; error: string };
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -154,8 +163,11 @@ export interface CalendarEventsStore {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  /** Import parsed events into a calendar (single history entry). */
-  importEvents: (events: CalendarEvent[], calendarId: string) => void;
+  /** Validate and import a complete batch into one calendar/history entry. */
+  importEvents: (
+    events: CalendarEventImport[],
+    calendarId: string,
+  ) => ImportEventsResult;
 }
 
 let idCounter = 0;
@@ -385,18 +397,44 @@ export function useCalendarEvents(): CalendarEventsStore {
   );
 
   const importEvents = useCallback(
-    (newEvents: CalendarEvent[], calendarId: string) => {
-      const persistentEvents = newEvents.filter((event) => !event.tutorialOnly);
-      if (persistentEvents.length === 0) return;
+    (
+      newEvents: CalendarEventImport[],
+      calendarId: string,
+    ): ImportEventsResult => {
+      if (!calendars.some((calendar) => calendar.id === calendarId)) {
+        return { ok: false, error: "The destination calendar no longer exists." };
+      }
+      if (newEvents.length === 0) {
+        return { ok: false, error: "Select at least one event to import." };
+      }
+      for (const event of newEvents) {
+        if (
+          !(event.start instanceof Date) ||
+          !(event.end instanceof Date) ||
+          Number.isNaN(event.start.getTime()) ||
+          Number.isNaN(event.end.getTime()) ||
+          event.end <= event.start
+        ) {
+          return {
+            ok: false,
+            error: `Cannot import "${event.title || "(No title)"}": invalid date range.`,
+          };
+        }
+      }
+      const persistentEvents: CalendarEvent[] = newEvents.map((event) => ({
+        ...event,
+        id: createEventId(),
+        calendarId,
+        start: new Date(event.start),
+        end: new Date(event.end),
+      }));
       commit((prev) => ({
         ...prev,
-        events: [
-          ...prev.events,
-          ...persistentEvents.map((e) => ({ ...e, calendarId })),
-        ],
+        events: [...prev.events, ...persistentEvents],
       }));
+      return { ok: true, events: persistentEvents };
     },
-    [commit],
+    [calendars, commit],
   );
 
   const undo = useCallback(() => {

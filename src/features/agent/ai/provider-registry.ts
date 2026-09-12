@@ -5,6 +5,7 @@ import type {
   RunnableAiProviderId,
 } from "@/features/agent/ai/ai-provider";
 import { GeminiProvider } from "@/features/agent/ai/gemini-provider";
+import { GroqProvider } from "@/features/agent/ai/groq-provider";
 import { OpenAiProvider } from "@/features/agent/ai/openai-provider";
 import { OpenCodeProvider } from "@/features/agent/ai/opencode-provider";
 import { OpenRouterProvider } from "@/features/agent/ai/openrouter-provider";
@@ -17,6 +18,7 @@ export interface AiProviderDefinition {
 const factories: Record<RunnableAiProviderId, () => AiProvider> = {
   openai: () => new OpenAiProvider(),
   openrouter: () => new OpenRouterProvider(),
+  groq: () => new GroqProvider(),
   opencode: () => new OpenCodeProvider(),
   gemini: () => new GeminiProvider(),
 };
@@ -24,6 +26,7 @@ const factories: Record<RunnableAiProviderId, () => AiProvider> = {
 const definitions: readonly AiProviderDefinition[] = [
   { metadata: new OpenAiProvider().metadata, create: factories.openai },
   { metadata: new OpenRouterProvider().metadata, create: factories.openrouter },
+  { metadata: new GroqProvider().metadata, create: factories.groq },
   { metadata: new OpenCodeProvider().metadata, create: factories.opencode },
   { metadata: new GeminiProvider().metadata, create: factories.gemini },
   {

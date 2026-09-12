@@ -137,6 +137,40 @@ describe("API key validation and persistence", () => {
     expect(loadPersistedApiKeys(storage).openai.status).toBe("validating");
   });
 
+  it("validates and persists Groq keys independently", async () => {
+    const storage = new MemoryStorage();
+    const result = await validateAndPersistApiKey({
+      provider: "groq",
+      apiKey: " gsk-valid-key ",
+      remember: true,
+      revision: 1,
+      storage,
+      signal: new AbortController().signal,
+      canCommit: () => true,
+      discover: vi.fn().mockResolvedValue([
+        {
+          id: "openai/gpt-oss-20b",
+          providerId: "groq",
+          displayName: "GPT-OSS 20B",
+          toolSupport: "supported",
+        },
+      ]),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      state: {
+        value: "gsk-valid-key",
+        persisted: true,
+        status: "verified",
+      },
+    });
+    expect(storage.getItem(getApiKeyStorageKey("groq"))).toBe(
+      "gsk-valid-key",
+    );
+    expect(storage.getItem(getApiKeyStorageKey("openai"))).toBeNull();
+  });
+
   it("does not overwrite an existing key when a replacement cannot commit", async () => {
     const storage = new MemoryStorage();
     persistApiKey(storage, "openai", "existing-key", true);

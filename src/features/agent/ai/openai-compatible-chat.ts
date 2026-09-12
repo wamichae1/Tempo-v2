@@ -82,11 +82,15 @@ export async function* streamOpenAiCompatibleChat({
   endpoint,
   providerName,
   headers,
+  bodyExtras,
+  classifyResponse,
 }: {
   request: AiProviderRequest;
   endpoint: string;
   providerName: string;
   headers?: Record<string, string>;
+  bodyExtras?: (request: AiProviderRequest) => Record<string, unknown>;
+  classifyResponse?: (response: Response) => AiProviderError;
 }): AsyncIterable<AiProviderEvent> {
   const baseMessages: ChatMessage[] =
     request.kind === "start"
@@ -120,6 +124,7 @@ export async function* streamOpenAiCompatibleChat({
         ...headers,
       },
       body: JSON.stringify({
+        ...bodyExtras?.(request),
         model: request.config.model,
         messages: baseMessages,
         tools: request.tools.map((tool) => ({
@@ -146,7 +151,10 @@ export async function* streamOpenAiCompatibleChat({
     );
   }
 
-  if (!response.ok) throw classifyHttpError(response, providerName);
+  if (!response.ok) {
+    throw classifyResponse?.(response) ??
+      classifyHttpError(response, providerName);
+  }
 
   let text = "";
   const calls = new Map<

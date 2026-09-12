@@ -20,6 +20,7 @@ export function TempoDialog({
   children,
   className,
   widthClass = "w-[320px]",
+  role = "alertdialog",
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +29,7 @@ export function TempoDialog({
   children: React.ReactNode;
   className?: string;
   widthClass?: string;
+  role?: "dialog" | "alertdialog";
 }) {
   const panelRef = React.useRef<HTMLDivElement>(null);
 
@@ -83,7 +85,7 @@ export function TempoDialog({
     >
       <div
         ref={panelRef}
-        role="alertdialog"
+        role={role}
         aria-modal="true"
         aria-label={title}
         className={cn(

@@ -12,9 +12,15 @@ describe("AI provider registry", () => {
     expect(listRunnableAiProviders().map((item) => item.metadata.id)).toEqual([
       "openai",
       "openrouter",
+      "groq",
       "gemini",
     ]);
-    expect(listAiProviderDefinitions()).toHaveLength(5);
+    expect(listAiProviderDefinitions()).toHaveLength(6);
+    expect(getAiProviderDefinition("groq").metadata).toMatchObject({
+      availability: "enabled",
+      defaultModelId: "openai/gpt-oss-20b",
+      apiKeyStorageKey: "tempo:ai-key:groq:v1",
+    });
     expect(getAiProviderDefinition("opencode").metadata).toMatchObject({
       availability: "deferred",
       availabilityLabel: "Unavailable in browser",
@@ -29,7 +35,13 @@ describe("AI provider registry", () => {
   });
 
   it("creates providers with matching metadata and key handling", () => {
-    for (const id of ["openai", "openrouter", "opencode", "gemini"] as const) {
+    for (const id of [
+      "openai",
+      "openrouter",
+      "groq",
+      "opencode",
+      "gemini",
+    ] as const) {
       const provider = createAiProvider(id);
       expect(provider.id).toBe(id);
       expect(provider.metadata.id).toBe(id);

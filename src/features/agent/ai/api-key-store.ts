@@ -36,6 +36,13 @@ export const EMPTY_API_KEY_STATES: ApiKeyStates = {
     status: "not-configured",
     error: "",
   },
+  groq: {
+    value: "",
+    persisted: false,
+    revision: 0,
+    status: "not-configured",
+    error: "",
+  },
   opencode: {
     value: "",
     persisted: false,
